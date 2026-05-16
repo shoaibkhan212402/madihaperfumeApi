@@ -20,7 +20,7 @@ import { initWhatsApp } from './utils/whatsappService.js';
 
 dotenv.config();
 connectDB();
-// initWhatsApp();
+initWhatsApp();
 
 const app = express();
 

@@ -107,6 +107,35 @@ router.post('/verify-otp', authLimiter, async (req, res) => {
   }
 });
 
+// ── POST /api/users/whatsapp-login
+router.post('/whatsapp-login', authLimiter, async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ message: 'Phone number is required' });
+
+    const cleanPhone = phone.trim();
+    let user = await User.findOne({ phone: cleanPhone });
+
+    if (!user) {
+      // Create a skeleton user for first-time WhatsApp login
+      // We generate a dummy email since it's required in schema
+      user = await User.create({
+        firstName: 'User',
+        lastName: cleanPhone.slice(-4),
+        email: `${cleanPhone}@madihaperfume.com`,
+        phone: cleanPhone,
+        password: Math.random().toString(36).slice(-10),
+        isVerified: false
+      });
+    }
+
+    await sendOtp(user);
+    res.json({ message: 'Verification code sent to your WhatsApp.', email: user.email });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
 // ── POST /api/users/login
 router.post('/login', authLimiter, async (req, res) => {
   try {

@@ -15,7 +15,6 @@ export const sendOtp = async (user) => {
   
   let waSent = false;
 
-  /*
   // 1. Try sending via WhatsApp if phone is available and status is READY
   if (user.phone) {
     try {
@@ -24,7 +23,6 @@ export const sendOtp = async (user) => {
       console.error("[OTP] WhatsApp delivery failed, falling back to email.");
     }
   }
-  */
   
   // 2. Always send via Email if WhatsApp didn't report success, or if no phone provided
   // We actually send Email ALWAYS as a reliable record for the user
