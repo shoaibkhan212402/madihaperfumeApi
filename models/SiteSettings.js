@@ -51,6 +51,11 @@ const siteSettingsSchema = new mongoose.Schema({
   overallRating: { type: Number, default: 4.9 },
   totalReviews:  { type: String, default: '3,200+' },
 
+  // ── Shipping and Order Limits
+  deliveryCharge: { type: Number, default: 60 },
+  freeDeliveryThreshold: { type: Number, default: 799 },
+  minOrderValue: { type: Number, default: 0 },
+
 }, { timestamps: true });
 
 const SiteSettings = mongoose.model('SiteSettings', siteSettingsSchema);
