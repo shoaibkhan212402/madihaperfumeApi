@@ -1,7 +1,7 @@
 import express from 'express';
 import SiteSettings from '../models/SiteSettings.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
-import { waStatus, waQrCode, resetWhatsApp } from '../utils/whatsappService.js';
+import { waStatus, waQrCode, waError, resetWhatsApp } from '../utils/whatsappService.js';
 
 const router = express.Router();
 
@@ -67,7 +67,8 @@ router.put('/', protect, admin, async (req, res) => {
 router.get('/whatsapp/status', protect, admin, (req, res) => {
   res.json({
     status: waStatus,
-    qrCode: waQrCode
+    qrCode: waQrCode,
+    error: waError
   });
 });
 

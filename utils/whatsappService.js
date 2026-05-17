@@ -8,6 +8,7 @@ import WhatsAppSession from '../models/WhatsAppSession.js';
 let client;
 export let waStatus = 'INITIALIZING';
 export let waQrCode = null;
+export let waError = null;
 
 const AUTH_PATH = path.join(process.cwd(), '.wwebjs_auth');
 
@@ -53,31 +54,50 @@ const loadSessionFromDb = async () => {
 export const initWhatsApp = async () => {
   waStatus = 'INITIALIZING';
   waQrCode = null;
+  waError = null;
 
   // Try to restore from DB if local auth is missing
   if (!fs.existsSync(AUTH_PATH)) {
     await loadSessionFromDb();
   }
 
-  client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: {
-      headless: true,
-      // Use local Chrome on Windows, or standard path on Linux/Hosting
-      executablePath: process.platform === 'win32' 
-        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' 
-        : undefined, // Let Puppeteer find it or use environment-specific path
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu'
-      ]
+  // Smart detection of Chrome/Chromium executable path for Hostinger/VPS
+  let chromePath = undefined;
+  if (process.platform === 'win32') {
+    chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  } else {
+    const linuxPaths = [
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium'
+    ];
+    for (const p of linuxPaths) {
+      if (fs.existsSync(p)) {
+        chromePath = p;
+        break;
+      }
     }
-  });
+  }
+
+  try {
+    client = new Client({
+      authStrategy: new LocalAuth(),
+      puppeteer: {
+        headless: true,
+        executablePath: chromePath,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+          '--single-process'
+        ]
+      }
+    });
 
   client.on('qr', (qr) => {
     console.log('[WhatsApp] QR Code generated! Please scan from Admin Panel.');
@@ -113,13 +133,20 @@ export const initWhatsApp = async () => {
   client.initialize().catch(err => {
     console.error('[WhatsApp] Failed to initialize client:', err);
     waStatus = 'ERROR';
+    waError = err.message || err.toString();
   });
+  } catch (err) {
+    console.error('[WhatsApp] Critical initialization error:', err);
+    waStatus = 'ERROR';
+    waError = err.message || err.toString();
+  }
 };
 
 export const resetWhatsApp = async () => {
   console.log('[WhatsApp] Performing full system reset...');
   waStatus = 'RESETTING';
   waQrCode = null;
+  waError = null;
   
   try {
     if (client) {
