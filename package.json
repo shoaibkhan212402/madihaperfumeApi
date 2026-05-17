@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "dependencies": {
     "adm-zip": "^0.5.17",
@@ -27,6 +28,7 @@
     "multer": "^2.1.1",
     "multer-storage-cloudinary": "^4.0.0",
     "nodemailer": "^8.0.6",
+    "puppeteer": "^22.0.0",
     "qrcode-terminal": "^0.12.0",
     "razorpay": "^2.9.6",
     "stripe": "^22.0.1",
