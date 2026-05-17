@@ -1,16 +1,16 @@
-import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth } = pkg;
+import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import pino from 'pino';
 import fs from 'fs-extra';
 import path from 'path';
 import AdmZip from 'adm-zip';
 import WhatsAppSession from '../models/WhatsAppSession.js';
 
-let client;
+let sock;
 export let waStatus = 'INITIALIZING';
 export let waQrCode = null;
 export let waError = null;
 
-const AUTH_PATH = path.join(process.cwd(), '.wwebjs_auth');
+const AUTH_PATH = path.join(process.cwd(), 'baileys_auth_info');
 
 const saveSessionToDb = async () => {
   try {
@@ -26,7 +26,11 @@ const saveSessionToDb = async () => {
     );
     console.log('[WhatsApp] Session synced to Database ✅');
   } catch (err) {
-    console.error('[WhatsApp] Failed to sync session to DB:', err);
+    if (err.code === 'EBUSY') {
+      console.log('[WhatsApp] DB Sync skipped (files locked by Baileys - normal on Windows).');
+    } else {
+      console.error('[WhatsApp] Failed to sync session to DB:', err.message);
+    }
   }
 };
 
@@ -46,7 +50,7 @@ const loadSessionFromDb = async () => {
     console.log('[WhatsApp] Session restored successfully ✅');
     return true;
   } catch (err) {
-    console.error('[WhatsApp] Failed to load session from DB:', err);
+    console.error('[WhatsApp] Failed to load session from DB:', err.message);
     return false;
   }
 };
@@ -56,85 +60,57 @@ export const initWhatsApp = async () => {
   waQrCode = null;
   waError = null;
 
-  // Try to restore from DB if local auth is missing
-  if (!fs.existsSync(AUTH_PATH)) {
-    await loadSessionFromDb();
-  }
-
-  // Smart detection of Chrome/Chromium executable path for Hostinger/VPS
-  let chromePath = undefined;
-  if (process.platform === 'win32') {
-    chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-  } else {
-    const linuxPaths = [
-      '/usr/bin/google-chrome-stable',
-      '/usr/bin/google-chrome',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/chromium'
-    ];
-    for (const p of linuxPaths) {
-      if (fs.existsSync(p)) {
-        chromePath = p;
-        break;
-      }
-    }
-  }
-
   try {
-    client = new Client({
-      authStrategy: new LocalAuth(),
-      puppeteer: {
-        headless: true,
-        executablePath: chromePath,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu',
-          '--single-process'
-        ]
+    if (!fs.existsSync(AUTH_PATH)) {
+      await loadSessionFromDb();
+    }
+
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_PATH);
+
+    sock = makeWASocket({
+      auth: state,
+      printQRInTerminal: false,
+      logger: pino({ level: 'silent' }), // Disable noisy logs
+      browser: ['Madiha Perfume', 'Chrome', '1.0.0']
+    });
+
+    sock.ev.on('creds.update', async () => {
+      await saveCreds();
+      // Sync to DB when credentials update
+      setTimeout(saveSessionToDb, 2000);
+    });
+
+    sock.ev.on('connection.update', (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        waQrCode = qr;
+        waStatus = 'QR_READY';
+        console.log('[WhatsApp] QR Code generated! Please scan from Admin Panel.');
+      }
+
+      if (connection === 'close') {
+        const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+        console.log('[WhatsApp] Connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect);
+        
+        waStatus = 'DISCONNECTED';
+        waQrCode = null;
+
+        if (shouldReconnect) {
+          initWhatsApp();
+        } else {
+          waStatus = 'AUTH_FAILED'; // Logged out
+          fs.removeSync(AUTH_PATH);
+          WhatsAppSession.deleteOne({ sessionName: 'madiha_master' }).catch(()=>{});
+        }
+      } else if (connection === 'open') {
+        console.log('[WhatsApp] Authenticated successfully! OTPs can now be sent.');
+        waStatus = 'READY';
+        waQrCode = null;
+        setTimeout(saveSessionToDb, 2000);
       }
     });
 
-  client.on('qr', (qr) => {
-    console.log('[WhatsApp] QR Code generated! Please scan from Admin Panel.');
-    waQrCode = qr;
-    waStatus = 'QR_READY';
-  });
-
-  client.on('ready', async () => {
-    console.log('[WhatsApp] Client is ready! OTPs can now be sent via WhatsApp.');
-    waStatus = 'READY';
-    waQrCode = null;
-    
-    // Save to DB after a short delay to ensure files are written
-    setTimeout(saveSessionToDb, 10000);
-  });
-
-  client.on('authenticated', () => {
-    console.log('[WhatsApp] Authenticated successfully!');
-    waStatus = 'AUTHENTICATED';
-  });
-
-  client.on('auth_failure', msg => {
-    console.error('[WhatsApp] Authentication failed:', msg);
-    waStatus = 'AUTH_FAILED';
-  });
-
-  client.on('disconnected', (reason) => {
-    console.log('[WhatsApp] Client disconnected:', reason);
-    waStatus = 'DISCONNECTED';
-    waQrCode = null;
-  });
-
-  client.initialize().catch(err => {
-    console.error('[WhatsApp] Failed to initialize client:', err);
-    waStatus = 'ERROR';
-    waError = err.message || err.toString();
-  });
   } catch (err) {
     console.error('[WhatsApp] Critical initialization error:', err);
     waStatus = 'ERROR';
@@ -148,23 +124,19 @@ export const resetWhatsApp = async () => {
   waQrCode = null;
   waError = null;
   
+  if (sock) {
+    try {
+      sock.logout();
+    } catch(err){}
+  }
+
   try {
-    if (client) {
-      await client.destroy();
+    if (fs.existsSync(AUTH_PATH)) {
+      fs.removeSync(AUTH_PATH);
     }
-  } catch (err) {
-    console.error('[WhatsApp] Error destroying client:', err);
-  }
+    await WhatsAppSession.deleteOne({ sessionName: 'madiha_master' });
+  } catch (err) {}
 
-  // Delete the LocalAuth directory and DB record to force a new QR code
-  if (fs.existsSync(AUTH_PATH)) {
-    fs.removeSync(AUTH_PATH);
-    console.log('[WhatsApp] Wiped local session data.');
-  }
-  await WhatsAppSession.deleteOne({ sessionName: 'madiha_master' });
-  console.log('[WhatsApp] Wiped database session data.');
-
-  // Re-initialize
   setTimeout(() => {
     initWhatsApp();
   }, 2000);
@@ -173,25 +145,21 @@ export const resetWhatsApp = async () => {
 };
 
 export const sendWhatsAppOtp = async (phone, otp) => {
-  console.log(`[WhatsApp] Simulated sending OTP ${otp} to ${phone}`);
+  console.log(`[WhatsApp] Sending OTP ${otp} to ${phone}`);
   
-  if (waStatus !== 'READY' || !client) {
+  if (waStatus !== 'READY' || !sock) {
     console.log('[WhatsApp] Client not ready. Only simulating send.');
     return;
   }
   
   try {
-    // Format phone number: remove non-digits
     let formattedPhone = phone.replace(/\D/g, '');
+    if (formattedPhone.length === 10) formattedPhone = '91' + formattedPhone;
+    formattedPhone += '@s.whatsapp.net';
     
-    // Auto-add India country code if length is 10
-    if (formattedPhone.length === 10) {
-      formattedPhone = '91' + formattedPhone;
-    }
-    
-    formattedPhone += '@c.us';
-    
-    await client.sendMessage(formattedPhone, `Your Madiha Perfume verification code is: *${otp}*\n\nIt is valid for 10 minutes. Please do not share this code with anyone.`);
+    await sock.sendMessage(formattedPhone, { 
+      text: `Your Madiha Perfume verification code is: *${otp}*\n\nIt is valid for 10 minutes. Please do not share this code with anyone.` 
+    });
     console.log(`[WhatsApp] Successfully sent OTP to ${phone}`);
     return true;
   } catch (error) {

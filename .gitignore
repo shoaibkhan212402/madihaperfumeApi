@@ -40,6 +40,7 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+baileys_auth_info/*
 .wwebjs_auth/*
 .wwebjs_cache/*
 .cache/*
