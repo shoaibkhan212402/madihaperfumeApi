@@ -1,0 +1,8 @@
+{
+  "ignore": [
+    "baileys_auth_info/*",
+    "scratch/*",
+    "node_modules/*",
+    "logs/*"
+  ]
+}
