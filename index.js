@@ -33,10 +33,26 @@ app.use(helmet({
 }));
 
 // ── CORS — Robust configuration to allow cross-origin requests
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://madihaperfume.com',
+  'https://www.madihaperfume.com',
+  'https://api.madihaperfume.com'
+];
+
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow all origins (for development and production flexibility)
-    callback(null, true);
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      if (process.env.NODE_ENV === 'development') {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -95,7 +111,7 @@ app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
   
   // ── Render Keep-Alive (Self-ping every 14 minutes)
-  const SERVER_URL = process.env.SERVER_URL || 'https://madihaperfume.onrender.com';
+  const SERVER_URL = process.env.SERVER_URL || 'https://api.madihaperfume.com';
   if (SERVER_URL) {
     console.log(`🚀 Keep-alive initialized for: ${SERVER_URL}`);
     setInterval(async () => {
