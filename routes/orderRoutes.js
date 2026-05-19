@@ -171,7 +171,9 @@ router.post('/razorpay', protect, async (req, res) => {
     const order = await razorpay.orders.create(options);
     res.json(order);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Razorpay Error:', err);
+    const errorMsg = err.error?.description || err.message || 'Razorpay order creation failed';
+    res.status(500).json({ message: errorMsg, details: err.error || err });
   }
 });
 
