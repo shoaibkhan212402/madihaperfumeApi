@@ -4,17 +4,17 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import connectDB from './config/db.js';
-import productRoutes  from './routes/productRoutes.js';
+import productRoutes from './routes/productRoutes.js';
 import categoryRoutes from './routes/categoryRoutes.js';
-import orderRoutes    from './routes/orderRoutes.js';
-import userRoutes     from './routes/userRoutes.js';
-import uploadRoutes   from './routes/uploadRoutes.js';
-import comboRoutes    from './routes/comboRoutes.js';
-import bannerRoutes   from './routes/bannerRoutes.js';
-import contactRoutes  from './routes/contactRoutes.js';
-import pageRoutes     from './routes/pageRoutes.js';
-import couponRoutes   from './routes/couponRoutes.js';
-import promoRoutes    from './routes/promoRoutes.js';
+import orderRoutes from './routes/orderRoutes.js';
+import userRoutes from './routes/userRoutes.js';
+import uploadRoutes from './routes/uploadRoutes.js';
+import comboRoutes from './routes/comboRoutes.js';
+import bannerRoutes from './routes/bannerRoutes.js';
+import contactRoutes from './routes/contactRoutes.js';
+import pageRoutes from './routes/pageRoutes.js';
+import couponRoutes from './routes/couponRoutes.js';
+import promoRoutes from './routes/promoRoutes.js';
 import siteSettingsRoutes from './routes/siteSettingsRoutes.js';
 import { initWhatsApp } from './utils/whatsappService.js';
 
@@ -35,25 +35,8 @@ app.use(helmet({
 // ── CORS — Robust configuration to allow cross-origin requests
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow if no origin (e.g., mobile apps, curl, self-pings) or empty
-    if (!origin || origin === 'null') {
-      return callback(null, true);
-    }
-
-    // Securely allow any localhost port or brand subdomains
-    const isLocalhost = origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
-    const isBrandDomain = origin.endsWith('madihaperfume.com') || origin.endsWith('onrender.com');
-
-    if (isLocalhost || isBrandDomain) {
-      callback(null, true);
-    } else {
-      if (process.env.NODE_ENV === 'development') {
-        callback(null, true);
-      } else {
-        console.warn(`⚠️ CORS blocked request from unauthorized origin: ${origin}`);
-        callback(null, false); // Securely block without crashing server logs
-      }
-    }
+    // Dynamically allow absolutely any requesting origin with zero restrictions!
+    callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -74,18 +57,18 @@ const globalLimiter = rateLimit({
 app.use(globalLimiter);
 
 // ── Routes
-app.use('/api/products',   productRoutes);
+app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
-app.use('/api/orders',     orderRoutes);
-app.use('/api/users',      userRoutes);
-app.use('/api/upload',     uploadRoutes);
-app.use('/api/combos',     comboRoutes);
-app.use('/api/banners',    bannerRoutes);
-app.use('/api/contact',    contactRoutes);
-app.use('/api/pages',      pageRoutes);
-app.use('/api/coupons',    couponRoutes);
-app.use('/api/promos',     promoRoutes);
-app.use('/api/settings',   siteSettingsRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/upload', uploadRoutes);
+app.use('/api/combos', comboRoutes);
+app.use('/api/banners', bannerRoutes);
+app.use('/api/contact', contactRoutes);
+app.use('/api/pages', pageRoutes);
+app.use('/api/coupons', couponRoutes);
+app.use('/api/promos', promoRoutes);
+app.use('/api/settings', siteSettingsRoutes);
 
 // ── Health check
 app.get('/', (req, res) => res.json({
@@ -110,7 +93,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
-  
+
   // ── Render Keep-Alive (Self-ping every 14 minutes)
   const SERVER_URL = process.env.SERVER_URL || 'https://api.madihaperfume.com';
   if (SERVER_URL) {
