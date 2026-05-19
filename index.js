@@ -95,7 +95,7 @@ app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
 
   // ── Render Keep-Alive (Self-ping every 14 minutes)
-  const SERVER_URL = process.env.SERVER_URL || 'https://api.madihaperfume.com';
+  const SERVER_URL = process.env.SERVER_URL;
   if (SERVER_URL) {
     console.log(`🚀 Keep-alive initialized for: ${SERVER_URL}`);
     setInterval(async () => {
