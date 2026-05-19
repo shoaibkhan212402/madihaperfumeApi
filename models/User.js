@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
-
+import './Product.js';
 const userSchema = mongoose.Schema(
   {
     firstName: { type: String, required: true },
@@ -30,7 +30,7 @@ const userSchema = mongoose.Schema(
     ],
     cartItems: [
       {
-        productId: { type: String, ref: 'Product' },
+        productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
         name: String,
         price: Number,
         originalPrice: Number,
