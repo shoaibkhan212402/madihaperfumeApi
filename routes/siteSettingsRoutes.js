@@ -22,15 +22,14 @@ const getOrDefault = async () => {
         { icon: "📦", title: "Luxury Packaging", desc: "Every order arrives in premium gift-ready packaging at no extra cost — perfect for gifting." },
         { icon: "✈️", title: "Pan-India Delivery", desc: "Fast, reliable shipping to all 28 states and UTs across India, delivered in 2–5 business days." },
         { icon: "💛", title: "50,000+ Happy Customers", desc: "Trusted by fragrance lovers across India and abroad since 2019. Our reviews speak for themselves." },
-        { icon: "🔄", title: "Easy 7-Day Returns", desc: "Not satisfied? We'll make it right — no questions asked, hassle-free return policy." },
+        { icon: "💬", title: "WhatsApp Support", desc: "Need assistance with your order? Our support team is here to help you 24/7." },
       ],
       instagramImages: [
         "/images/attar.png", "/images/offers.png", "/images/perfume_spray.png", "/images/hero.png", "/images/combo.jpeg", "/images/theme_hero.png"
       ],
       trustBar: [
-        { icon: "🚚", label: "Free Shipping" },
+        { icon: "🚚", label: "Free Shipping on Prepaid" },
         { icon: "🛡️", label: "100% Authentic Fragrances" },
-        { icon: "🔁", label: "Easy 7-Day Returns" },
         { icon: "💬", label: "WhatsApp Support" },
       ]
     });
