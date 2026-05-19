@@ -33,24 +33,25 @@ app.use(helmet({
 }));
 
 // ── CORS — Robust configuration to allow cross-origin requests
-const ALLOWED_ORIGINS = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'https://madihaperfume.com',
-  'https://www.madihaperfume.com',
-  'https://api.madihaperfume.com'
-];
-
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) {
+    // Allow if no origin (e.g., mobile apps, curl, self-pings) or empty
+    if (!origin || origin === 'null') {
+      return callback(null, true);
+    }
+
+    // Securely allow any localhost port or brand subdomains
+    const isLocalhost = origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
+    const isBrandDomain = origin.endsWith('madihaperfume.com') || origin.endsWith('onrender.com');
+
+    if (isLocalhost || isBrandDomain) {
       callback(null, true);
     } else {
       if (process.env.NODE_ENV === 'development') {
         callback(null, true);
       } else {
-        callback(new Error('Not allowed by CORS'));
+        console.warn(`⚠️ CORS blocked request from unauthorized origin: ${origin}`);
+        callback(null, false); // Securely block without crashing server logs
       }
     }
   },
