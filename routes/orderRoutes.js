@@ -8,9 +8,12 @@ import { protect, admin } from '../middleware/authMiddleware.js';
 const router = express.Router();
 
 // ── Razorpay Instance
+const cleanKeyId = (process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || '').trim();
+const cleanKeySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
+
 const razorpay = new Razorpay({
-  key_id:     process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
+  key_id:     cleanKeyId,
+  key_secret: cleanKeySecret,
 });
 
 // ── POST /api/orders  Create order (authenticated)
@@ -131,7 +134,7 @@ router.patch('/:id/pay', protect, async (req, res) => {
     // ── Verify Razorpay HMAC signature
     if (razorpay_order_id && razorpay_payment_id && razorpay_signature) {
       const generated = crypto
-        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+        .createHmac('sha256', cleanKeySecret)
         .update(`${razorpay_order_id}|${razorpay_payment_id}`)
         .digest('hex');
 
@@ -169,7 +172,10 @@ router.post('/razorpay', protect, async (req, res) => {
       receipt:  `rcpt_${Date.now()}`,
     };
     const order = await razorpay.orders.create(options);
-    res.json(order);
+    res.json({
+      ...order,
+      key: process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+    });
   } catch (err) {
     console.error('Razorpay Error:', err);
     const errorMsg = err.error?.description || err.message || 'Razorpay order creation failed';
