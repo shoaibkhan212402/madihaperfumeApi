@@ -1,7 +1,7 @@
 import express from 'express';
 import SiteSettings from '../models/SiteSettings.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
-import { waStatus, waQrCode, waError, resetWhatsApp } from '../utils/whatsappService.js';
+import { waStatus, waQrCode, waError, lastConnectedAt, connectionUpSince, getUptimeSeconds, resetWhatsApp } from '../utils/whatsappService.js';
 
 const router = express.Router();
 
@@ -67,7 +67,21 @@ router.get('/whatsapp/status', protect, admin, (req, res) => {
   res.json({
     status: waStatus,
     qrCode: waQrCode,
-    error: waError
+    error: waError,
+    lastConnectedAt: lastConnectedAt ? lastConnectedAt.toISOString() : null,
+    uptimeSeconds: getUptimeSeconds(),
+    connectedSince: connectionUpSince ? connectionUpSince.toISOString() : null,
+  });
+});
+
+// ── GET /api/settings/whatsapp/health (Monitoring — no auth required)
+router.get('/whatsapp/health', (req, res) => {
+  const isHealthy = waStatus === 'READY';
+  res.status(isHealthy ? 200 : 503).json({
+    healthy: isHealthy,
+    status: waStatus,
+    uptimeSeconds: getUptimeSeconds(),
+    lastConnectedAt: lastConnectedAt ? lastConnectedAt.toISOString() : null,
   });
 });
 
