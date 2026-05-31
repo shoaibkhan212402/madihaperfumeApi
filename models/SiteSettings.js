@@ -60,6 +60,7 @@ const siteSettingsSchema = new mongoose.Schema({
   seoTitle: { type: String, default: 'Madiha Perfume | Luxury Indian & Arabic Fragrances' },
   seoDescription: { type: String, default: 'Premium attar, luxury perfume sprays and gift combos - crafted for elegance. Shop authentic Indian fragrances at Madiha Perfume.' },
   seoKeywords: { type: String, default: 'madiha perfume, attar, luxury fragrance, perfume spray, premium scents, indian attar, oud, musk' },
+  seoImage: { type: String, default: '/og-image.png' },
 
 }, { timestamps: true });
 
