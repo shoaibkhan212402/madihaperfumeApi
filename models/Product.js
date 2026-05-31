@@ -23,6 +23,9 @@ const productSchema = mongoose.Schema(
     badge: { type: String },
     isActive: { type: Boolean, required: true, default: true },
     isBestSeller: { type: Boolean, default: false },
+    seoTitle: { type: String },
+    seoDescription: { type: String },
+    seoKeywords: { type: String },
   },
   { timestamps: true }
 );

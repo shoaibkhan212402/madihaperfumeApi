@@ -10,6 +10,9 @@ const categorySchema = mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Category',
     },
+    seoTitle: { type: String },
+    seoDescription: { type: String },
+    seoKeywords: { type: String },
   },
   { timestamps: true }
 );

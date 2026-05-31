@@ -31,10 +31,10 @@ router.get('/:idOrSlug', async (req, res) => {
 // ── POST /api/categories  Admin: create
 router.post('/', protect, admin, async (req, res) => {
   try {
-    const { name, slug, description, image, parentCategory } = req.body;
+    const { name, slug, description, image, parentCategory, seoTitle, seoDescription, seoKeywords } = req.body;
     const exists = await Category.findOne({ slug });
     if (exists) return res.status(400).json({ message: 'Category slug already exists' });
-    const cat = await Category.create({ name, slug, description, image, parentCategory });
+    const cat = await Category.create({ name, slug, description, image, parentCategory, seoTitle, seoDescription, seoKeywords });
     res.status(201).json(cat);
   } catch (err) {
     res.status(400).json({ message: err.message });
