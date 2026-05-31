@@ -18,7 +18,11 @@ import promoRoutes from './routes/promoRoutes.js';
 import siteSettingsRoutes from './routes/siteSettingsRoutes.js';
 import { initWhatsApp } from './utils/whatsappService.js';
 
-dotenv.config();
+// Load correct .env file based on environment
+// On Hostinger (production): loads .env.production
+// On local (development): loads .env
+const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.env';
+dotenv.config({ path: envFile });
 connectDB();
 initWhatsApp();
 
