@@ -23,9 +23,10 @@ import { existsSync } from 'fs';
 // Auto-detect correct .env file — avoids chicken-and-egg problem
 // On Hostinger: .env.production exists → loads it (with all production credentials)
 // On local dev: only .env exists → loads it
+// override: true ensures Hostinger's pre-set (empty/wrong) vars get replaced
 const envFile = existsSync('.env.production') ? '.env.production' : '.env';
-dotenv.config({ path: envFile });
-console.log(`✅ Loaded env from: ${envFile}`);
+dotenv.config({ path: envFile, override: true });
+console.log(`✅ Loaded env from: ${envFile} | DB: ${process.env.DATABASE_URL ? 'SET' : 'MISSING'}`);
 connectDB();
 initWhatsApp();
 
