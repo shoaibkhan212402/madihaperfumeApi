@@ -32,16 +32,21 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow Cloudinary images
 }));
 
-// ── CORS — Robust configuration to allow cross-origin requests
-app.use(cors({
+// ── CORS — Robust configuration to allow absolutely any origin and custom headers
+const corsOptions = {
   origin: (origin, callback) => {
-    // Dynamically allow absolutely any requesting origin with zero restrictions!
-    callback(null, true);
+    // Dynamically echo the requesting origin back to support credentials.
+    // If no origin is provided (e.g. server-to-server or curl), fallback to '*'
+    callback(null, origin || '*');
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Customer-Token'],
-}));
+  // Omit allowedHeaders to dynamically reflect and allow any request headers sent by the client,
+  // preventing preflight CORS failures from new or custom headers (e.g., X-Customer-Token).
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Enable pre-flight for all routes
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
