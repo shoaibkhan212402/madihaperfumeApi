@@ -18,11 +18,14 @@ import promoRoutes from './routes/promoRoutes.js';
 import siteSettingsRoutes from './routes/siteSettingsRoutes.js';
 import { initWhatsApp } from './utils/whatsappService.js';
 
-// Load correct .env file based on environment
-// On Hostinger (production): loads .env.production
-// On local (development): loads .env
-const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.env';
+import { existsSync } from 'fs';
+
+// Auto-detect correct .env file — avoids chicken-and-egg problem
+// On Hostinger: .env.production exists → loads it (with all production credentials)
+// On local dev: only .env exists → loads it
+const envFile = existsSync('.env.production') ? '.env.production' : '.env';
 dotenv.config({ path: envFile });
+console.log(`✅ Loaded env from: ${envFile}`);
 connectDB();
 initWhatsApp();
 
