@@ -12,6 +12,8 @@ jspm_packages/
 .env
 .env.test
 .env.local
+.env.production
+.env.*.local
 
 # Build artifacts
 dist/
