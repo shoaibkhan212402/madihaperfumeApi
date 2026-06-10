@@ -253,15 +253,22 @@ router.post('/google-login', async (req, res) => {
     let user = await User.findOne({ email: email.toLowerCase().trim() });
 
     if (!user) {
-      // Create user if they don't exist
+      // Create new user — Google-authenticated users are pre-verified
       user = await User.create({
         firstName: given_name || 'User',
         lastName: family_name || '',
         email: email.toLowerCase().trim(),
-        password: Math.random().toString(36).slice(-10), // Random password for OAuth users
+        password: Math.random().toString(36).slice(-10),
         isGoogleUser: true,
         googleId: sub,
+        isVerified: true, // Google handles identity verification
       });
+    } else if (!user.isVerified || !user.isGoogleUser) {
+      // Existing user signing in with Google for the first time — mark as verified
+      user.isVerified = true;
+      user.isGoogleUser = true;
+      if (!user.googleId) user.googleId = sub;
+      await user.save();
     }
 
     res.json({
