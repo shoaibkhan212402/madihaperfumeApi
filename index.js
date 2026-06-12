@@ -112,22 +112,4 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
-
-  // ── Render Keep-Alive (Self-ping every 14 minutes)
-  const SERVER_URL = process.env.SERVER_URL;
-  if (SERVER_URL) {
-    console.log(`🚀 Keep-alive initialized for: ${SERVER_URL}`);
-    setInterval(async () => {
-      try {
-        const https = await import('https');
-        https.get(SERVER_URL, (res) => {
-          console.log(`📡 Self-ping [${new Date().toLocaleTimeString()}]: ${res.statusCode}`);
-        }).on('error', (err) => {
-          console.error(`❌ Self-ping failed: ${err.message}`);
-        });
-      } catch (err) {
-        console.error('❌ Could not import https for self-ping');
-      }
-    }, 14 * 60 * 1000); // 14 mins
-  }
 });
