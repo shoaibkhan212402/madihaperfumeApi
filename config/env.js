@@ -5,10 +5,16 @@ import { existsSync } from 'fs';
 const envFile = existsSync('.env.production') ? '.env.production' : '.env';
 dotenv.config({ path: envFile, override: true });
 
-// Trim all environment variables to clean up trailing spaces/newlines/carriage returns (\r)
+// Trim and clean up environment variables
 for (const key in process.env) {
   if (typeof process.env[key] === 'string') {
-    process.env[key] = process.env[key].trim();
+    let val = process.env[key].trim();
+    // Hostinger/panels sometimes escape '%' as '\%' to prevent env-variable interpolation.
+    // We replace '\%' with '%' to restore the correct URL-encoded password.
+    if (val.includes('\\%')) {
+      val = val.replace(/\\%/g, '%');
+    }
+    process.env[key] = val;
   }
 }
 
