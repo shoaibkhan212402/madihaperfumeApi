@@ -228,6 +228,10 @@ export const initWhatsApp = async () => {
   }
   isReconnecting = true;
 
+  if (process.env.NODE_APP_INSTANCE && process.env.NODE_APP_INSTANCE !== '0') {
+    console.warn(`[WhatsApp] ⚠️ WARNING: Running in PM2 Cluster Mode (Instance #${process.env.NODE_APP_INSTANCE}). This will cause connection conflicts!`);
+  }
+
   waQrCode = null;
   waError  = null;
   setStatus('INITIALIZING');
