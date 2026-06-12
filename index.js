@@ -26,7 +26,14 @@ import { existsSync } from 'fs';
 // override: true ensures Hostinger's pre-set (empty/wrong) vars get replaced
 const envFile = existsSync('.env.production') ? '.env.production' : '.env';
 dotenv.config({ path: envFile, override: true });
-console.log(`✅ Loaded env from: ${envFile} | DB: ${process.env.DATABASE_URL ? 'SET' : 'MISSING'}`);
+
+const maskURI = (uri) => {
+  if (!uri) return 'MISSING';
+  if (!uri.includes('@')) return uri;
+  return uri.replace(/(mongodb(?:\+srv)?:\/\/[^:]+:)([^@]+)(@.+)/, '$1******$3');
+};
+
+console.log(`✅ Loaded env from: ${envFile} | DB URI: ${maskURI(process.env.DATABASE_URL)}`);
 connectDB();
 initWhatsApp();
 
