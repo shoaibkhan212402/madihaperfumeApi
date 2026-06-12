@@ -1,5 +1,5 @@
+import './config/env.js';
 import express from 'express';
-import dotenv from 'dotenv';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -18,22 +18,6 @@ import promoRoutes from './routes/promoRoutes.js';
 import siteSettingsRoutes from './routes/siteSettingsRoutes.js';
 import { initWhatsApp } from './utils/whatsappService.js';
 
-import { existsSync } from 'fs';
-
-// Auto-detect correct .env file — avoids chicken-and-egg problem
-// On Hostinger: .env.production exists → loads it (with all production credentials)
-// On local dev: only .env exists → loads it
-// override: true ensures Hostinger's pre-set (empty/wrong) vars get replaced
-const envFile = existsSync('.env.production') ? '.env.production' : '.env';
-dotenv.config({ path: envFile, override: true });
-
-const maskURI = (uri) => {
-  if (!uri) return 'MISSING';
-  if (!uri.includes('@')) return uri;
-  return uri.replace(/(mongodb(?:\+srv)?:\/\/[^:]+:)([^@]+)(@.+)/, '$1******$3');
-};
-
-console.log(`✅ Loaded env from: ${envFile} | DB URI: ${maskURI(process.env.DATABASE_URL)}`);
 connectDB();
 initWhatsApp();
 
