@@ -1,7 +1,7 @@
 import express from 'express';
 import SiteSettings from '../models/SiteSettings.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
-import { waStatus, waQrCode, waError, lastConnectedAt, connectionUpSince, getUptimeSeconds, resetWhatsApp } from '../utils/whatsappService.js';
+import { getWhatsAppStatus, resetWhatsApp } from '../utils/whatsappService.js';
 
 const router = express.Router();
 
@@ -63,26 +63,29 @@ router.put('/', protect, admin, async (req, res) => {
 });
 
 // ── GET /api/settings/whatsapp/status (Admin)
-router.get('/whatsapp/status', protect, admin, (req, res) => {
-  res.json({
-    status: waStatus,
-    qrCode: waQrCode,
-    error: waError,
-    lastConnectedAt: lastConnectedAt ? lastConnectedAt.toISOString() : null,
-    uptimeSeconds: getUptimeSeconds(),
-    connectedSince: connectionUpSince ? connectionUpSince.toISOString() : null,
-  });
+router.get('/whatsapp/status', protect, admin, async (req, res) => {
+  try {
+    const statusInfo = await getWhatsAppStatus();
+    res.json(statusInfo);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // ── GET /api/settings/whatsapp/health (Monitoring — no auth required)
-router.get('/whatsapp/health', (req, res) => {
-  const isHealthy = waStatus === 'READY';
-  res.status(isHealthy ? 200 : 503).json({
-    healthy: isHealthy,
-    status: waStatus,
-    uptimeSeconds: getUptimeSeconds(),
-    lastConnectedAt: lastConnectedAt ? lastConnectedAt.toISOString() : null,
-  });
+router.get('/whatsapp/health', async (req, res) => {
+  try {
+    const statusInfo = await getWhatsAppStatus();
+    const isHealthy = statusInfo.status === 'READY';
+    res.status(isHealthy ? 200 : 503).json({
+      healthy: isHealthy,
+      status: statusInfo.status,
+      uptimeSeconds: statusInfo.uptimeSeconds,
+      lastConnectedAt: statusInfo.lastConnectedAt,
+    });
+  } catch (err) {
+    res.status(500).json({ healthy: false, status: 'ERROR', error: err.message });
+  }
 });
 
 // ── POST /api/settings/whatsapp/reset (Admin)

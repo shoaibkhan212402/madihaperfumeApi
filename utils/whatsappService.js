@@ -10,6 +10,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import AdmZip from 'adm-zip';
 import WhatsAppSession from '../models/WhatsAppSession.js';
+import Redis from 'ioredis';
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 const AUTH_PATH        = path.join(process.cwd(), 'baileys_auth_info');
@@ -50,6 +51,87 @@ let lastConnectionEventAt = Date.now();
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
+export const isMasterInstance = () => {
+  return (process.env.WHATSAPP_MODE === 'master') || 
+         (!process.env.WHATSAPP_MODE && (!process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0'));
+};
+
+let isRedisSubInitialized = false;
+let redisSub = null;
+let isRedisPubInitialized = false;
+let redisPub = null;
+
+export const initRedisPublisher = () => {
+  if (isRedisPubInitialized) return;
+  if (!process.env.REDIS_URL) return;
+  isRedisPubInitialized = true;
+  try {
+    redisPub = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 3 });
+    redisPub.on('error', () => {});
+  } catch (err) {
+    isRedisPubInitialized = false;
+    console.error('[WhatsApp] Redis Publisher init failed:', err.message);
+  }
+};
+
+export const initRedisSubscriber = () => {
+  if (isRedisSubInitialized) return;
+  if (!process.env.REDIS_URL) return;
+  isRedisSubInitialized = true;
+  try {
+    redisSub = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+    redisSub.on('ready', () => {
+      console.log('[WhatsApp Master] Redis Subscriber connected and ready.');
+      redisSub.subscribe('whatsapp:otp', (err) => {
+        if (err) {
+          console.error('[WhatsApp Master] Failed to subscribe:', err.message);
+          isRedisSubInitialized = false;
+        }
+      });
+    });
+    redisSub.on('message', async (channel, message) => {
+      if (channel === 'whatsapp:otp') {
+        try {
+          const payload = JSON.parse(message);
+          if (payload.type === 'otp') {
+            await sendWhatsAppOtp(payload.phone, payload.otp, true);
+          } else if (payload.type === 'reset') {
+            await resetWhatsApp(true);
+          }
+        } catch (e) {
+          console.error('[WhatsApp Master] Pub/Sub message parse failed:', e.message);
+        }
+      }
+    });
+    redisSub.on('error', (err) => {
+      console.error('[WhatsApp Master] Redis sub error:', err.message);
+    });
+  } catch (err) {
+    isRedisSubInitialized = false;
+    console.error('[WhatsApp Master] Redis Subscriber init failed:', err.message);
+  }
+};
+
+export const saveStatusToDb = async () => {
+  if (!isMasterInstance()) return;
+  try {
+    await WhatsAppSession.findOneAndUpdate(
+      { sessionName: SESSION_NAME },
+      {
+        status: waStatus,
+        qrCode: waQrCode,
+        error: waError,
+        lastConnectedAt,
+        connectionUpSince,
+        lastUpdated: new Date()
+      },
+      { upsert: true }
+    );
+  } catch (err) {
+    console.error('[WhatsApp] Failed to save status to DB:', err.message);
+  }
+};
+
 const resetReconnectAttempts = () => { reconnectAttempts = 0; };
 
 const getReconnectDelay = () => {
@@ -66,12 +148,16 @@ const setStatus = (newStatus) => {
     if (statusFlapTimer) return; // already pending
     statusFlapTimer = setTimeout(() => {
       statusFlapTimer = null;
-      if (waStatus !== 'READY') waStatus = 'DISCONNECTED';
+      if (waStatus !== 'READY') {
+        waStatus = 'DISCONNECTED';
+        saveStatusToDb();
+      }
     }, STATUS_FLAP_DELAY_MS);
     return;
   }
   if (statusFlapTimer) { clearTimeout(statusFlapTimer); statusFlapTimer = null; }
   waStatus = newStatus;
+  saveStatusToDb();
 };
 
 // ─── Socket Teardown ─────────────────────────────────────────────────────────────
@@ -222,6 +308,18 @@ const scheduleReconnect = (wipeSession = false) => {
 
 // ─── Main Init ────────────────────────────────────────────────────────────────────
 export const initWhatsApp = async () => {
+  const isMaster = isMasterInstance();
+
+  if (!isMaster) {
+    console.log('[WhatsApp] 🛡️ Running in SLAVE mode. Skipping socket initialization.');
+    initRedisPublisher();
+    return;
+  }
+
+  // Master logic:
+  initRedisPublisher();
+  initRedisSubscriber();
+
   if (isReconnecting) {
     console.log('[WhatsApp] ⏳ Init already in progress — skipping duplicate call.');
     return;
@@ -325,12 +423,13 @@ export const initWhatsApp = async () => {
         const now = new Date();
         console.log(`[WhatsApp] ✅ Connected at ${now.toLocaleTimeString()}!`);
 
-        setStatus('READY');
         waQrCode          = null;
         waError           = null;
         lastConnectedAt   = now;
         connectionUpSince = now;
         resetReconnectAttempts(); // ← reset backoff on success
+
+        setStatus('READY');
 
         // Persist session to DB
         debouncedSaveSessionToDb();
@@ -362,7 +461,27 @@ export const initWhatsApp = async () => {
 };
 
 // ─── Send OTP ──────────────────────────────────────────────────────────────────
-export const sendWhatsAppOtp = async (phone, otp) => {
+export const sendWhatsAppOtp = async (phone, otp, isDirect = false) => {
+  const isMaster = isMasterInstance();
+
+  if (!isMaster && !isDirect) {
+    console.log(`[WhatsApp Slave] 📤 Forwarding OTP request for ${phone} to Master via Redis Pub/Sub...`);
+    initRedisPublisher();
+    if (redisPub) {
+      try {
+        await redisPub.publish('whatsapp:otp', JSON.stringify({ type: 'otp', phone, otp }));
+        console.log(`[WhatsApp Slave] ✅ OTP request forwarded to Master.`);
+        return true;
+      } catch (err) {
+        console.error('[WhatsApp Slave] ❌ Failed to forward OTP via Redis:', err.message);
+        return false;
+      }
+    }
+    console.error('[WhatsApp Slave] ❌ Redis Publisher not available.');
+    return false;
+  }
+
+  // Master / Direct send logic:
   console.log(`[WhatsApp] Sending OTP to ${phone} | Status: ${waStatus}`);
 
   if (waStatus !== 'READY' || !sock) {
@@ -409,7 +528,26 @@ export const sendWhatsAppOtp = async (phone, otp) => {
 };
 
 // ─── Admin Reset ─────────────────────────────────────────────────────────────────
-export const resetWhatsApp = async () => {
+export const resetWhatsApp = async (isDirect = false) => {
+  const isMaster = isMasterInstance();
+
+  if (!isMaster && !isDirect) {
+    console.log('[WhatsApp Slave] 📤 Forwarding Reset request to Master via Redis Pub/Sub...');
+    initRedisPublisher();
+    if (redisPub) {
+      try {
+        await redisPub.publish('whatsapp:otp', JSON.stringify({ type: 'reset' }));
+        console.log('[WhatsApp Slave] ✅ Reset request forwarded.');
+        return true;
+      } catch (err) {
+        console.error('[WhatsApp Slave] ❌ Failed to forward Reset request:', err.message);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  // Master Reset Logic:
   console.log('[WhatsApp] 🔄 Admin-triggered full reset…');
   waStatus          = 'RESETTING';
   waQrCode          = null;
@@ -429,9 +567,65 @@ export const resetWhatsApp = async () => {
 
   try { if (fs.existsSync(AUTH_PATH)) fs.removeSync(AUTH_PATH); } catch (_) {}
   try { await WhatsAppSession.deleteOne({ sessionName: SESSION_NAME }); } catch (_) {}
+  
+  saveStatusToDb(); // Clear status in MongoDB
 
   setTimeout(() => initWhatsApp(), 3_000);
   return true;
+};
+
+// ─── Exported Status Handler for both Master and Slave ────────────────────────────
+export const getWhatsAppStatus = async () => {
+  const isMaster = isMasterInstance();
+
+  if (isMaster) {
+    return {
+      status: waStatus,
+      qrCode: waQrCode,
+      error: waError,
+      lastConnectedAt: lastConnectedAt ? lastConnectedAt.toISOString() : null,
+      uptimeSeconds: getUptimeSeconds(),
+      connectedSince: connectionUpSince ? connectionUpSince.toISOString() : null,
+    };
+  } else {
+    // Slave process: read status from MongoDB
+    try {
+      const session = await WhatsAppSession.findOne({ sessionName: SESSION_NAME });
+      if (!session) {
+        return {
+          status: 'DISCONNECTED',
+          qrCode: null,
+          error: 'No active WhatsApp session in database.',
+          lastConnectedAt: null,
+          uptimeSeconds: 0,
+          connectedSince: null,
+        };
+      }
+
+      let uptimeSeconds = 0;
+      if (session.connectionUpSince && session.status === 'READY') {
+        uptimeSeconds = Math.floor((Date.now() - new Date(session.connectionUpSince).getTime()) / 1000);
+      }
+
+      return {
+        status: session.status || 'DISCONNECTED',
+        qrCode: session.status === 'QR_READY' ? session.qrCode : null,
+        error: session.error || null,
+        lastConnectedAt: session.lastConnectedAt ? new Date(session.lastConnectedAt).toISOString() : null,
+        uptimeSeconds,
+        connectedSince: session.connectionUpSince ? new Date(session.connectionUpSince).toISOString() : null,
+      };
+    } catch (err) {
+      return {
+        status: 'ERROR',
+        qrCode: null,
+        error: `Database read failed: ${err.message}`,
+        lastConnectedAt: null,
+        uptimeSeconds: 0,
+        connectedSince: null,
+      };
+    }
+  }
 };
 
 // ─── Uptime Helper ────────────────────────────────────────────────────────────────
