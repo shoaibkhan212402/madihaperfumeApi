@@ -337,10 +337,10 @@ export const initWhatsApp = async () => {
   cleanupSocket();
 
   try {
-    // Production: Render filesystem is ephemeral — always restore from DB.
-    // Development: Only restore from DB when local folder is missing/empty.
+    // Hostinger's filesystem is persistent. Only restore from MongoDB
+    // if local auth folder is missing or empty to prevent overwriting with stale keys.
     const hasLocalAuth = fs.existsSync(AUTH_PATH) && fs.readdirSync(AUTH_PATH).length > 0;
-    if (IS_PRODUCTION || !hasLocalAuth) {
+    if (!hasLocalAuth) {
       await loadSessionFromDb();
     }
 
