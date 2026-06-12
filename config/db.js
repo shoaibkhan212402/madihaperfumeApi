@@ -12,7 +12,8 @@ const analyzePassword = (uri) => {
     const match = uri.match(/mongodb(?:\+srv)?:\/\/[^:]+:([^@]+)@/);
     if (!match) return 'No password found in URI';
     const password = match[1];
-    return `length: ${password.length}, start: "${password.slice(0, 2)}", end: "${password.slice(-2)}", has%40: ${password.includes('%40')}, has@: ${password.includes('@')}`;
+    const charCodes = Array.from(password).map(c => c.charCodeAt(0)).join(',');
+    return `length: ${password.length}, start: "${password.slice(0, 2)}", end: "${password.slice(-2)}", has%40: ${password.includes('%40')}, has@: ${password.includes('@')}, charCodes: [${charCodes}]`;
   } catch (err) {
     return 'Error: ' + err.message;
   }
