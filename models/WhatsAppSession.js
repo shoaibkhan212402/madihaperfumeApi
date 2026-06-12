@@ -6,9 +6,5 @@ const whatsappSessionSchema = new mongoose.Schema({
   lastUpdated: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-// Explicit index declaration (ensures MongoDB creates it even if schema-level gets skipped)
-whatsappSessionSchema.index({ sessionName: 1 }, { unique: true });
-
-
 const WhatsAppSession = mongoose.model('WhatsAppSession', whatsappSessionSchema);
 export default WhatsAppSession;
