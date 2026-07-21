@@ -2,12 +2,15 @@ import express from 'express';
 import SiteSettings from '../models/SiteSettings.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
 import { getWhatsAppStatus, resetWhatsApp } from '../utils/whatsappService.js';
+import redis from '../config/redis.js';
 
 const router = express.Router();
+const CACHE_KEY = 'site_settings';
+const clearCache = () => redis.del(CACHE_KEY);
 
 // Helper to seed initial settings if empty
 const getOrDefault = async () => {
-  let settings = await SiteSettings.findOne({});
+  let settings = await SiteSettings.findOne({}).lean();
   if (!settings) {
     settings = await SiteSettings.create({
       testimonials: [
@@ -41,7 +44,12 @@ const getOrDefault = async () => {
 // ── GET /api/settings (Public)
 router.get('/', async (req, res) => {
   try {
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    const cached = await redis.get(CACHE_KEY);
+    if (cached) return res.json(JSON.parse(cached));
+
     const settings = await getOrDefault();
+    await redis.setex(CACHE_KEY, 300, JSON.stringify(settings));
     res.json(settings);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -57,6 +65,7 @@ router.put('/', protect, admin, async (req, res) => {
     } else {
       settings = await SiteSettings.findOneAndUpdate({}, req.body, { new: true });
     }
+    await clearCache();
     res.json(settings);
   } catch (err) {
     res.status(400).json({ message: err.message });

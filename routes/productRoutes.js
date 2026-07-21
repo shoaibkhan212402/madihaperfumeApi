@@ -20,6 +20,7 @@ const clearCache = async () => {
 router.get('/', async (req, res) => {
   try {
     const { category, search, sort, page = 1, limit = 20 } = req.query;
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
 
     const cacheKey = `products_${JSON.stringify(req.query)}`;
     const cached = await redis.get(cacheKey);
@@ -49,13 +50,16 @@ router.get('/', async (req, res) => {
     };
     const sortBy = sortOptions[sort] || sortOptions.newest;
 
-    const skip  = (Number(page) - 1) * Number(limit);
-    const total = await Product.countDocuments(filter);
-    const products = await Product.find(filter)
-      .populate('category', 'name slug')
-      .sort(sortBy)
-      .skip(skip)
-      .limit(Number(limit));
+    const skip = (Number(page) - 1) * Number(limit);
+    const [total, products] = await Promise.all([
+      Product.countDocuments(filter),
+      Product.find(filter)
+        .populate('category', 'name slug')
+        .sort(sortBy)
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(),
+    ]);
 
     const result = { products, total, page: Number(page), pages: Math.ceil(total / Number(limit)) };
     await redis.setex(cacheKey, 300, JSON.stringify(result));
@@ -78,10 +82,19 @@ router.get('/all-admin', protect, admin, async (req, res) => {
 // ── GET /api/products/meta/bestsellers  Public: get bestsellers
 router.get('/meta/bestsellers', async (req, res) => {
   try {
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    // Cache key shares the "products_" prefix so the existing clearCache() calls
+    // (on create/update/delete/toggle) invalidate this alongside the main listing.
+    const cacheKey = 'products_bestsellers';
+    const cached = await redis.get(cacheKey);
+    if (cached) return res.json(JSON.parse(cached));
+
     const products = await Product.find({ isActive: true, isBestSeller: true })
       .populate('category', 'name slug')
       .sort({ createdAt: -1 })
-      .limit(12);
+      .limit(12)
+      .lean();
+    await redis.setex(cacheKey, 300, JSON.stringify(products));
     res.json(products);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -91,10 +104,11 @@ router.get('/meta/bestsellers', async (req, res) => {
 // ── GET /api/products/:idOrSlug
 router.get('/:idOrSlug', async (req, res) => {
   try {
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
     const param = req.params.idOrSlug;
     let product = param.match(/^[0-9a-fA-F]{24}$/)
-      ? await Product.findById(param).populate('category', 'name slug')
-      : await Product.findOne({ slug: param }).populate('category', 'name slug');
+      ? await Product.findById(param).populate('category', 'name slug').lean()
+      : await Product.findOne({ slug: param }).populate('category', 'name slug').lean();
     if (!product) return res.status(404).json({ message: 'Product not found' });
     res.json(product);
   } catch (err) {

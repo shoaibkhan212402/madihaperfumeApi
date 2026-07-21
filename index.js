@@ -2,6 +2,7 @@ import './config/env.js';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import connectDB from './config/db.js';
 import productRoutes from './routes/productRoutes.js';
@@ -18,9 +19,11 @@ import promoRoutes from './routes/promoRoutes.js';
 import siteSettingsRoutes from './routes/siteSettingsRoutes.js';
 import sitemapRoutes from './routes/sitemapRoutes.js';
 import { initWhatsApp } from './utils/whatsappService.js';
+import { startSelfPing } from './utils/selfPing.js';
 
 connectDB();
 initWhatsApp();
+startSelfPing();
 
 const app = express();
 
@@ -46,6 +49,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use(compression()); // gzip JSON/API responses — cuts transfer size for product/list payloads
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
