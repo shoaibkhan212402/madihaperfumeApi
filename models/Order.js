@@ -50,6 +50,12 @@ const orderSchema = mongoose.Schema(
       enum: ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED'],
       default: 'PENDING',
     },
+    // Shiprocket shipment reference — set once the order is shipped
+    awbCode:              { type: String },
+    courierName:          { type: String },
+    shiprocketOrderId:    { type: String },
+    shiprocketShipmentId: { type: String },
+
     isReturnRequested: { type: Boolean, default: false },
     returnReason:      { type: String },
     returnStatus: {

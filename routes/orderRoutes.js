@@ -4,6 +4,7 @@ import Razorpay from 'razorpay';
 import Order from '../models/Order.js';
 import Coupon from '../models/Coupon.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
+import { trackShiprocketShipment, checkShiprocketConnection } from '../utils/shiprocketService.js';
 
 const router = express.Router();
 
@@ -211,6 +212,24 @@ router.get('/admin/stats', protect, admin, async (req, res) => {
   }
 });
 
+// ── Builds the synthetic status timeline from internal order fields — used
+// whenever there's no Shiprocket AWB yet, or the live Shiprocket call fails.
+function buildFallbackTimeline(order, status) {
+  return [
+    { label: 'Order confirmed', description: 'Your order has been placed successfully.', date: order.createdAt, done: true },
+    { label: 'Processing', description: 'We are preparing your order for dispatch.', date: order.createdAt, done: ['PROCESSING','SHIPPED','DELIVERED','RETURNED'].includes(status) },
+    { label: 'Shipped', description: 'Your parcel has been handed over to the courier.', date: order.updatedAt, done: ['SHIPPED','DELIVERED','RETURNED'].includes(status) },
+    { label: 'Out for delivery', description: 'The courier is on the way to your delivery address.', date: order.deliveredAt || order.updatedAt, done: status === 'DELIVERED' || status === 'RETURNED' },
+    { label: 'Delivered', description: 'Your order has been delivered.', date: order.deliveredAt, done: status === 'DELIVERED' },
+  ];
+}
+
+// ── GET /api/orders/shiprocket/status  Admin: verify SHIPROCKET_EMAIL/PASSWORD work  ← static, before /:id
+router.get('/shiprocket/status', protect, admin, async (req, res) => {
+  const result = await checkShiprocketConnection();
+  res.json(result);
+});
+
 // ── GET /api/orders/track/:id  Public: track order by ID + email  ← static prefix, before /:id
 router.get('/track/:id', async (req, res) => {
   try {
@@ -225,18 +244,74 @@ router.get('/track/:id', async (req, res) => {
        return res.status(401).json({ message: 'Email does not match this order' });
     }
 
+    const status = order.status?.toUpperCase() || 'PENDING';
+
+    // If we have a real Shiprocket shipment reference, prefer live tracking data
+    if (order.awbCode || order.shiprocketShipmentId) {
+      try {
+        const live = await trackShiprocketShipment({ awbCode: order.awbCode, shipmentId: order.shiprocketShipmentId });
+        if (live) {
+          return res.json({
+            _id: order._id,
+            status,
+            createdAt: order.createdAt,
+            updatedAt: order.updatedAt,
+            isPaid: order.isPaid,
+            isDelivered: order.isDelivered,
+            deliveredAt: order.deliveredAt,
+            orderItems: order.orderItems,
+            totalPrice: order.totalPrice,
+            courier: live.courier || order.courierName || 'Shiprocket',
+            trackingNumber: order.awbCode || live.trackingNumber || 'Pending',
+            estimatedDelivery: live.estimatedDelivery || order.deliveredAt || order.updatedAt,
+            trackingUrl: live.trackingUrl || null,
+            timeline: live.timeline?.length ? live.timeline : buildFallbackTimeline(order, status),
+            source: 'shiprocket',
+          });
+        }
+      } catch (shipErr) {
+        console.error('Shiprocket tracking error:', shipErr.message);
+        // fall through to the synthetic timeline below so the page never breaks
+      }
+    }
+
     res.json({
       _id: order._id,
-      status: order.status,
+      status,
       createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
       isPaid: order.isPaid,
       isDelivered: order.isDelivered,
       deliveredAt: order.deliveredAt,
       orderItems: order.orderItems,
       totalPrice: order.totalPrice,
+      courier: order.courierName || 'Shiprocket',
+      trackingNumber: order.awbCode || order.paymentId || order._id?.toString?.()?.slice(-8)?.toUpperCase?.() || 'Pending',
+      estimatedDelivery: order.deliveredAt || order.updatedAt,
+      timeline: buildFallbackTimeline(order, status),
+      source: 'internal',
     });
   } catch (err) {
     res.status(500).json({ message: 'Invalid Order ID' });
+  }
+});
+
+// ── PATCH /api/orders/:id/shipping  Admin: attach Shiprocket AWB/courier once a shipment is created
+router.patch('/:id/shipping', protect, admin, async (req, res) => {
+  try {
+    const { awbCode, courierName, shiprocketOrderId, shiprocketShipmentId } = req.body;
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    if (awbCode !== undefined) order.awbCode = awbCode;
+    if (courierName !== undefined) order.courierName = courierName;
+    if (shiprocketOrderId !== undefined) order.shiprocketOrderId = shiprocketOrderId;
+    if (shiprocketShipmentId !== undefined) order.shiprocketShipmentId = shiprocketShipmentId;
+
+    const updated = await order.save();
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
   }
 });
 
