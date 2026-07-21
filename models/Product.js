@@ -30,5 +30,9 @@ const productSchema = mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes for query optimization
+productSchema.index({ isActive: 1, isBestSeller: 1 });
+productSchema.index({ category: 1, isActive: 1 });
+
 const Product = mongoose.model('Product', productSchema);
 export default Product;

@@ -42,7 +42,7 @@ router.get('/promo', protect, admin, (req, res) => {
 });
 
 // Policy pages content
-const POLICIES = {
+export const POLICIES = {
   'privacy-policy': {
     title: 'Privacy Policy',
     lastUpdated: '2026-01-01',

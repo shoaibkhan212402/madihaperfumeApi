@@ -16,6 +16,7 @@ import pageRoutes from './routes/pageRoutes.js';
 import couponRoutes from './routes/couponRoutes.js';
 import promoRoutes from './routes/promoRoutes.js';
 import siteSettingsRoutes from './routes/siteSettingsRoutes.js';
+import sitemapRoutes from './routes/sitemapRoutes.js';
 import { initWhatsApp } from './utils/whatsappService.js';
 
 connectDB();
@@ -72,6 +73,7 @@ app.use('/api/pages', pageRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/promos', promoRoutes);
 app.use('/api/settings', siteSettingsRoutes);
+app.use('/api/sitemap.xml', sitemapRoutes);
 
 // ── Health check
 app.get('/', (req, res) => res.json({

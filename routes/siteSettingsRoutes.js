@@ -27,6 +27,7 @@ const getOrDefault = async () => {
       instagramImages: [
         "/images/attar.png", "/images/offers.png", "/images/perfume_spray.png", "/images/hero.png", "/images/combo.jpeg", "/images/theme_hero.png"
       ],
+      instagramReels: [],
       trustBar: [
         { icon: "🚚", label: "Free Shipping on Prepaid" },
         { icon: "🛡️", label: "100% Authentic Fragrances" },

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import dns from 'dns';
 
 const maskURI = (uri) => {
   if (!uri) return 'MISSING';
@@ -21,6 +22,8 @@ const analyzePassword = (uri) => {
 
 const connectDB = async () => {
   try {
+    // Override system DNS to resolve MongoDB Atlas SRV records via public DNS
+    dns.setServers(['8.8.8.8', '1.1.1.1']);
     const uri = process.env.DATABASE_URL;
     console.log(`🔌 Connecting to MongoDB: ${maskURI(uri)}`);
     console.log(`🔑 DB Password Details: ${analyzePassword(uri)}`);
