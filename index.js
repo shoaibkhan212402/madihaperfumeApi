@@ -46,6 +46,8 @@ const corsOptions = {
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   // Omit allowedHeaders to dynamically reflect and allow any request headers sent by the client,
   // preventing preflight CORS failures from new or custom headers (e.g., X-Customer-Token).
+  // Cache preflight results for 24h so repeat visits/navigations skip the extra OPTIONS round trip.
+  maxAge: 86400,
 };
 
 app.use(cors(corsOptions));
