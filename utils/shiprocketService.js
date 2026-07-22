@@ -54,6 +54,26 @@ async function shiprocketGet(path, retryOn401 = true) {
   return data;
 }
 
+async function shiprocketPost(path, body, retryOn401 = true) {
+  const token = await getToken();
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 401 && retryOn401) {
+    cachedToken = null;
+    return shiprocketPost(path, body, false);
+  }
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || `Shiprocket API error (${res.status})`);
+  }
+  return data;
+}
+
 function normalizeTracking(raw) {
   const trackingData = raw?.tracking_data;
   if (!trackingData) return null;
@@ -102,4 +122,76 @@ export async function checkShiprocketConnection() {
   } catch (err) {
     return { connected: false, message: err.message };
   }
+}
+
+// ── Automatically create a Shiprocket order + assign courier when payment is confirmed.
+// Returns { shiprocketOrderId, shiprocketShipmentId, awbCode, courierName } on success.
+export async function createShiprocketOrder(order) {
+  // ── 1. Create Order in Shiprocket
+  const orderDate = new Date(order.createdAt).toISOString().replace('T', ' ').slice(0, 19);
+  const pickupLocation = process.env.SHIPROCKET_PICKUP_LOCATION || 'Primary';
+
+  const srOrderPayload = {
+    order_id:    order._id.toString(),
+    order_date:  orderDate,
+    pickup_location: pickupLocation,
+
+    // Billing = Shipping (same address for direct-to-customer e-commerce)
+    billing_customer_name: order.firstName,
+    billing_last_name:     order.lastName || '',
+    billing_address:       order.address,
+    billing_city:          order.city,
+    billing_pincode:       order.postalCode,
+    billing_state:         order.state || '',
+    billing_country:       order.country || 'India',
+    billing_email:         order.paymentEmail || 'customer@madihaperfume.com',
+    billing_phone:         order.phone || '9999999999',
+    billing_alternate_phone: order.phone || '',
+
+    shipping_is_billing: true,
+
+    order_items: order.orderItems.map((item) => ({
+      name:          item.name,
+      selling_price: item.price,
+      units:         item.qty,
+      sku:           item.product?.toString() || item.productRef || `SKU-${Date.now()}`,
+      hsn:           '33030090', // HSN code for perfumes/attars in India
+    })),
+
+    payment_method: order.paymentMethod === 'COD' ? 'COD' : 'Prepaid',
+    sub_total:      order.totalPrice,
+    length:         15,   // cm — default box size for perfume packages
+    breadth:        10,
+    height:         10,
+    weight:         0.5,  // kg — default weight
+  };
+
+  const srOrder = await shiprocketPost('/orders/create/adhoc', srOrderPayload);
+
+  const shiprocketOrderId    = srOrder.order_id?.toString()    || srOrder.payload?.order_id?.toString();
+  const shiprocketShipmentId = srOrder.shipment_id?.toString() || srOrder.payload?.shipment_id?.toString();
+
+  if (!shiprocketOrderId) {
+    throw new Error(`Shiprocket order creation failed: ${JSON.stringify(srOrder)}`);
+  }
+
+  // ── 2. Auto-assign best courier & generate AWB
+  const assignPayload = {
+    shipment_id: [Number(shiprocketShipmentId)],
+  };
+
+  let awbCode = null;
+  let courierName = null;
+
+  try {
+    const assignRes = await shiprocketPost('/courier/assign/awb', assignPayload);
+    awbCode     = assignRes?.response?.data?.awb_code || assignRes?.awb_code || null;
+    courierName = assignRes?.response?.data?.courier_name || assignRes?.courier_name || null;
+  } catch (assignErr) {
+    // AWB assignment may fail if courier serviceability hasn't been configured yet.
+    // Order is still created in Shiprocket — admin can assign courier from dashboard.
+    console.warn('[Shiprocket] AWB auto-assign failed (order created):', assignErr.message);
+  }
+
+  return { shiprocketOrderId, shiprocketShipmentId, awbCode, courierName };
 }

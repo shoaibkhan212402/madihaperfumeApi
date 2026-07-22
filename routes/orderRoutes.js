@@ -4,7 +4,7 @@ import Razorpay from 'razorpay';
 import Order from '../models/Order.js';
 import Coupon from '../models/Coupon.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
-import { trackShiprocketShipment, checkShiprocketConnection } from '../utils/shiprocketService.js';
+import { trackShiprocketShipment, checkShiprocketConnection, createShiprocketOrder } from '../utils/shiprocketService.js';
 
 const router = express.Router();
 
@@ -156,6 +156,25 @@ router.patch('/:id/pay', protect, async (req, res) => {
 
     const updated = await order.save();
     res.json(updated);
+
+    // ── Auto-push to Shiprocket after payment confirmed (fire-and-forget)
+    // This runs AFTER the response is sent so customer is never delayed.
+    setImmediate(async () => {
+      try {
+        const sr = await createShiprocketOrder(updated);
+        await Order.findByIdAndUpdate(updated._id, {
+          shiprocketOrderId:    sr.shiprocketOrderId,
+          shiprocketShipmentId: sr.shiprocketShipmentId,
+          awbCode:              sr.awbCode || undefined,
+          courierName:          sr.courierName || undefined,
+          status:               sr.awbCode ? 'SHIPPED' : 'PROCESSING',
+        });
+        console.log(`[Shiprocket] Order ${updated._id} pushed → SR Order: ${sr.shiprocketOrderId}, AWB: ${sr.awbCode}`);
+      } catch (srErr) {
+        console.error(`[Shiprocket] Auto-push failed for order ${updated._id}:`, srErr.message);
+        // Non-critical — order is paid and saved. Admin can push manually from dashboard.
+      }
+    });
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
@@ -389,4 +408,73 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
+// ── POST /api/orders/delivery/hook  — Shiprocket sends real-time delivery events here
+// ⚠️  URL must NOT contain 'shiprocket','kartrocket','sr','kr' (Shiprocket restriction)
+// Setup: Shiprocket Dashboard → Settings → API → Webhooks:
+//   URL:   https://api.madihaperfume.com/api/orders/delivery/hook
+//   Token: value of SHIPROCKET_WEBHOOK_TOKEN in .env
+// This is PUBLIC POST endpoint — Shiprocket calls it from their servers automatically.
+router.post('/delivery/hook', async (req, res) => {
+  try {
+    // ── Verify the x-api-key token matches our secret
+    const incomingToken = req.headers['x-api-key'] || req.headers['authorization'];
+    const expectedToken = process.env.SHIPROCKET_WEBHOOK_TOKEN;
+    if (expectedToken && incomingToken !== expectedToken) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    // Always respond 200 immediately so Shiprocket doesn't retry
+    res.status(200).json({ received: true });
+
+    const body = req.body;
+    const awb  = body?.awb || body?.awb_code;
+    const srStatus = (body?.current_status || body?.status || '').toLowerCase();
+
+    if (!awb || !srStatus) return;
+
+    // Map Shiprocket status strings → our internal status
+    const statusMap = {
+      'pickup scheduled':   'PROCESSING',
+      'pickup generated':   'PROCESSING',
+      'picked up':          'SHIPPED',
+      'in transit':         'SHIPPED',
+      'out for delivery':   'SHIPPED',
+      'delivered':          'DELIVERED',
+      'rto initiated':      'PROCESSING',
+      'rto delivered':      'CANCELLED',
+      'cancelled':          'CANCELLED',
+      'lost':               'CANCELLED',
+    };
+
+    let newStatus = null;
+    for (const [key, val] of Object.entries(statusMap)) {
+      if (srStatus.includes(key)) { newStatus = val; break; }
+    }
+
+    if (!newStatus) return;
+
+    const order = await Order.findOne({ awbCode: awb });
+    if (!order) {
+      console.warn(`[Webhook] No order found for AWB: ${awb}`);
+      return;
+    }
+
+    const updates = { status: newStatus };
+    if (newStatus === 'DELIVERED') {
+      updates.isDelivered = true;
+      updates.deliveredAt = new Date();
+    }
+    if (body?.courier_name && !order.courierName) {
+      updates.courierName = body.courier_name;
+    }
+
+    await Order.findByIdAndUpdate(order._id, updates);
+    console.log(`[Webhook] Order ${order._id} AWB ${awb} → ${newStatus} ("${srStatus}")`);
+
+  } catch (err) {
+    console.error('[Webhook] Delivery hook error:', err.message);
+  }
+});
+
 export default router;
+

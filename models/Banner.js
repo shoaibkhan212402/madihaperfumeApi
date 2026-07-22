@@ -10,10 +10,10 @@ const bannerSchema = new mongoose.Schema({
   image: { type: String, required: true },
   mobileImage: { type: String, default: "" },
   textColor: { type: String, default: "#ffffff" }, // Added to control text color
-  ctaLabel: { type: String, default: "Explore Collection" },
-  ctaLink: { type: String, default: "/collections/all" },
-  cta2Label: { type: String, default: "Our Heritage" },
-  cta2Link: { type: String, default: "/pages/about-us" },
+  ctaLabel: { type: String, default: "" },
+  ctaLink: { type: String, default: "" },
+  cta2Label: { type: String, default: "" },
+  cta2Link: { type: String, default: "" },
   order: { type: Number, default: 0 },
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });

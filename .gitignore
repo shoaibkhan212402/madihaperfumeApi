@@ -47,3 +47,4 @@ baileys_auth_info/*
 .cache/*
 .env.production
 .env.production
+.env.production
