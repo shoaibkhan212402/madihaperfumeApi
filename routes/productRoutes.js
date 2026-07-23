@@ -7,14 +7,7 @@ import redis from '../config/redis.js';
 const router = express.Router();
 
 // Helper: clear ALL product-related cache keys (pattern-based)
-const clearCache = async () => {
-  try {
-    const keys = await redis.keys('products_*');
-    if (keys.length > 0) {
-      for (const key of keys) await redis.del(key);
-    }
-  } catch { /* Redis unavailable — no-op */ }
-};
+const clearCache = () => redis.deleteByPattern('products_*');
 
 // ── GET /api/products  (public, supports ?category=&search=&sort=&page=&limit=)
 router.get('/', async (req, res) => {
@@ -106,10 +99,16 @@ router.get('/:idOrSlug', async (req, res) => {
   try {
     res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
     const param = req.params.idOrSlug;
-    let product = param.match(/^[0-9a-fA-F]{24}$/)
+    // Shares the "products_" prefix so clearCache() invalidates it alongside the listing.
+    const cacheKey = `products_item_${param}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) return res.json(JSON.parse(cached));
+
+    const product = param.match(/^[0-9a-fA-F]{24}$/)
       ? await Product.findById(param).populate('category', 'name slug').lean()
       : await Product.findOne({ slug: param }).populate('category', 'name slug').lean();
     if (!product) return res.status(404).json({ message: 'Product not found' });
+    await redis.setex(cacheKey, 300, JSON.stringify(product));
     res.json(product);
   } catch (err) {
     res.status(500).json({ message: err.message });

@@ -4,10 +4,7 @@ import { protect, admin } from '../middleware/authMiddleware.js';
 import redis from '../config/redis.js';
 
 const router = express.Router();
-const clearCache = async () => {
-  const keys = await redis.keys('combos_*');
-  for (const key of keys) await redis.del(key);
-};
+const clearCache = () => redis.deleteByPattern('combos_*');
 
 // ── GET /api/combos  (public)
 router.get('/', async (req, res) => {
@@ -43,10 +40,15 @@ router.get('/:idOrSlug', async (req, res) => {
   try {
     res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
     const param = req.params.idOrSlug;
+    const cacheKey = `combos_item_${param}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) return res.json(JSON.parse(cached));
+
     const combo = param.match(/^[0-9a-fA-F]{24}$/)
       ? await Combo.findById(param).populate('products').lean()
       : await Combo.findOne({ slug: param }).populate('products').lean();
     if (!combo) return res.status(404).json({ message: 'Combo not found' });
+    await redis.setex(cacheKey, 300, JSON.stringify(combo));
     res.json(combo);
   } catch (err) {
     res.status(500).json({ message: err.message });
