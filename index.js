@@ -33,6 +33,10 @@ app.set('trust proxy', 1);
 // ── Security Headers (Helmet)
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow Cloudinary images
+  // Default 'same-origin' severs window.postMessage between the page and the
+  // Google Sign-In popup/iframe, breaking the OAuth handshake. This is Google's
+  // documented value for keeping COOP while allowing that popup flow to work.
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
 }));
 
 // ── CORS — Robust configuration to allow absolutely any origin and custom headers
