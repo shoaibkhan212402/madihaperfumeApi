@@ -4,6 +4,7 @@ import {
   DisconnectReason,
   Browsers,
   fetchLatestBaileysVersion,
+  jidNormalizedUser,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import fs from 'fs-extra';
@@ -523,6 +524,26 @@ export const sendWhatsAppOtp = async (phone, otp, isDirect = false) => {
       scheduleReconnect(false);
     }
 
+    return false;
+  }
+};
+
+// ─── Self-Notify (sends a message to the admin's own connected WhatsApp number) ───
+// Used for internal alerts (e.g. new return/replacement requests) — shows up as a
+// "message yourself" chat in the admin's own WhatsApp app, no separate number needed.
+export const sendWhatsAppSelfMessage = async (text) => {
+  if (waStatus !== 'READY' || !sock?.user?.id) {
+    console.warn(`[WhatsApp] Not ready (status=${waStatus}). Skipping self-notify.`);
+    return false;
+  }
+
+  try {
+    const selfJid = jidNormalizedUser(sock.user.id);
+    await sock.sendMessage(selfJid, { text });
+    lastConnectionEventAt = Date.now();
+    return true;
+  } catch (error) {
+    console.error('[WhatsApp] ❌ Failed to send self-notify message:', error.message || error);
     return false;
   }
 };
