@@ -10,7 +10,7 @@ import pino from 'pino';
 import fs from 'fs-extra';
 import path from 'path';
 import AdmZip from 'adm-zip';
-import WhatsAppSession from '../models/WhatsAppSession.js';
+import WhatsAppSession from '../models-sql/WhatsAppSession.js';
 import Redis from 'ioredis';
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
@@ -30,8 +30,18 @@ const WATCHDOG_STALE_THRESHOLD_MS = 240_000;  // 4 minutes silence = stale
 // Status flap guard
 const STATUS_FLAP_DELAY_MS = 5_000;
 
-// DB sync debounce
+// DB sync debounce — MAX caps how long continuous creds churn (initial pairing,
+// active messaging) can keep pushing the save back; without it the debounce can
+// starve itself forever and the MySQL backup never actually writes.
 const DEBOUNCE_DB_SYNC_MS = 8_000;
+const MAX_DB_SYNC_WAIT_MS = 30_000;
+
+// Single-master file lock — prevents two processes (e.g. an accidental second
+// `npm run dev`, or a PM2 misconfig) from opening the same WhatsApp session at
+// once, which causes a connectionReplaced flap loop and eventual forced logout.
+const LOCK_PATH          = path.join(process.cwd(), '.whatsapp-master.lock');
+const LOCK_HEARTBEAT_MS  = 15_000;
+const LOCK_STALE_MS      = 45_000; // no heartbeat in this window ⇒ holder presumed dead
 
 // ─── Exported State ─────────────────────────────────────────────────────────────
 let sock = null;
@@ -46,15 +56,65 @@ let reconnectAttempts    = 0;
 let isReconnecting       = false;
 let reconnectTimer       = null;
 let dbSyncTimer          = null;
+let dbSyncFirstPendingAt = null;
 let watchdogTimer        = null;
 let statusFlapTimer      = null;
+let lockHeartbeatTimer   = null;
+let lockRetryTimer       = null;
 let lastConnectionEventAt = Date.now();
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
 export const isMasterInstance = () => {
-  return (process.env.WHATSAPP_MODE === 'master') || 
+  return (process.env.WHATSAPP_MODE === 'master') ||
          (!process.env.WHATSAPP_MODE && (!process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0'));
+};
+
+// ─── Single-Master Lock (cross-process, file-based) ────────────────────────────
+const writeLockFile = () => {
+  try { fs.writeFileSync(LOCK_PATH, JSON.stringify({ pid: process.pid, ts: Date.now() })); } catch (_) {}
+};
+
+const readLockFile = () => {
+  try { return JSON.parse(fs.readFileSync(LOCK_PATH, 'utf8')); } catch (_) { return null; }
+};
+
+// Signal 0 sends nothing but still throws if the pid doesn't exist — a
+// standard cross-platform (incl. Windows) liveness check.
+const isProcessAlive = (pid) => {
+  try { process.kill(pid, 0); return true; }
+  catch (err) { return err.code === 'EPERM'; } // exists, just not ours — treat as alive
+};
+
+// Returns true if this process now owns the lock (either it was free, held by
+// us already, or the previous holder is gone/stale).
+const tryAcquireMasterLock = () => {
+  const existing = readLockFile();
+  if (existing && existing.pid !== process.pid) {
+    if (isProcessAlive(existing.pid)) {
+      // Still running — only reclaim once its heartbeat has actually gone stale.
+      // (nodemon restarts on Windows hard-kill the child without running our
+      // shutdown handlers, so this time-based fallback rarely gets hit in
+      // practice — the alive-check above already caught it by then.)
+      const age = Date.now() - (existing.ts || 0);
+      if (age < LOCK_STALE_MS) return false;
+      console.warn(`[WhatsApp] ⚠️ Reclaiming lock — pid=${existing.pid} is alive but its heartbeat is ${Math.round(age / 1000)}s stale.`);
+    } else {
+      console.warn(`[WhatsApp] ⚠️ Reclaiming lock — pid=${existing.pid} is no longer running.`);
+    }
+  }
+  writeLockFile();
+  if (lockHeartbeatTimer) clearInterval(lockHeartbeatTimer);
+  lockHeartbeatTimer = setInterval(writeLockFile, LOCK_HEARTBEAT_MS);
+  return true;
+};
+
+const releaseMasterLock = () => {
+  if (lockHeartbeatTimer) { clearInterval(lockHeartbeatTimer); lockHeartbeatTimer = null; }
+  const existing = readLockFile();
+  if (existing && existing.pid === process.pid) {
+    try { fs.removeSync(LOCK_PATH); } catch (_) {}
+  }
 };
 
 let isRedisSubInitialized = false;
@@ -116,18 +176,15 @@ export const initRedisSubscriber = () => {
 export const saveStatusToDb = async () => {
   if (!isMasterInstance()) return;
   try {
-    await WhatsAppSession.findOneAndUpdate(
-      { sessionName: SESSION_NAME },
-      {
-        status: waStatus,
-        qrCode: waQrCode,
-        error: waError,
-        lastConnectedAt,
-        connectionUpSince,
-        lastUpdated: new Date()
-      },
-      { upsert: true }
-    );
+    await WhatsAppSession.upsert({
+      sessionName: SESSION_NAME,
+      status: waStatus,
+      qrCode: waQrCode,
+      error: waError,
+      lastConnectedAt,
+      connectionUpSince,
+      lastUpdated: new Date(),
+    });
   } catch (err) {
     console.error('[WhatsApp] Failed to save status to DB:', err.message);
   }
@@ -201,12 +258,12 @@ const saveSessionToDb = async () => {
     zip.addLocalFolder(AUTH_PATH);
     const base64 = zip.toBuffer().toString('base64');
 
-    await WhatsAppSession.findOneAndUpdate(
-      { sessionName: SESSION_NAME },
-      { sessionData: base64, lastUpdated: new Date() },
-      { upsert: true, new: true }
-    );
-    console.log('[WhatsApp] ✅ Session synced to MongoDB.');
+    await WhatsAppSession.upsert({
+      sessionName: SESSION_NAME,
+      sessionData: base64,
+      lastUpdated: new Date(),
+    });
+    console.log('[WhatsApp] ✅ Session synced to MySQL.');
   } catch (err) {
     if (err.code === 'EBUSY') {
       console.log('[WhatsApp] DB sync skipped — files locked by Baileys (normal on Windows).');
@@ -217,21 +274,29 @@ const saveSessionToDb = async () => {
 };
 
 const debouncedSaveSessionToDb = () => {
+  const now = Date.now();
+  if (!dbSyncFirstPendingAt) dbSyncFirstPendingAt = now;
+
   if (dbSyncTimer) clearTimeout(dbSyncTimer);
+
+  // Under continuous creds churn the plain debounce below would keep resetting
+  // forever and never fire — force a flush once a save has been pending too long.
+  const overdue = now - dbSyncFirstPendingAt >= MAX_DB_SYNC_WAIT_MS;
   dbSyncTimer = setTimeout(async () => {
     dbSyncTimer = null;
+    dbSyncFirstPendingAt = null;
     await saveSessionToDb();
-  }, DEBOUNCE_DB_SYNC_MS);
+  }, overdue ? 0 : DEBOUNCE_DB_SYNC_MS);
 };
 
 const loadSessionFromDb = async () => {
   try {
-    const session = await WhatsAppSession.findOne({ sessionName: SESSION_NAME });
+    const session = await WhatsAppSession.findOne({ where: { sessionName: SESSION_NAME } });
     if (!session) {
       console.log('[WhatsApp] No saved session in DB. Will generate new QR.');
       return false;
     }
-    console.log('[WhatsApp] 🔄 Restoring session from MongoDB...');
+    console.log('[WhatsApp] 🔄 Restoring session from MySQL...');
     if (fs.existsSync(AUTH_PATH)) fs.removeSync(AUTH_PATH);
     const zip = new AdmZip(Buffer.from(session.sessionData, 'base64'));
     zip.extractAllTo(AUTH_PATH, true);
@@ -296,7 +361,7 @@ const scheduleReconnect = (wipeSession = false) => {
     console.log('[WhatsApp] 🗑️  Wiping session (fatal auth error) — you must scan a new QR code.');
     cleanupSocket();
     try { fs.removeSync(AUTH_PATH); } catch (_) {}
-    WhatsAppSession.deleteOne({ sessionName: SESSION_NAME }).catch(() => {});
+    WhatsAppSession.destroy({ where: { sessionName: SESSION_NAME } }).catch(() => {});
     resetReconnectAttempts();
     reconnectTimer = setTimeout(() => { reconnectTimer = null; initWhatsApp(); }, 3_000);
   } else {
@@ -319,6 +384,16 @@ export const initWhatsApp = async () => {
 
   // Master logic:
   initRedisPublisher();
+
+  if (!tryAcquireMasterLock()) {
+    console.warn('[WhatsApp] ⚠️ Another process already holds the WhatsApp master lock on this machine — sitting this out as a Redis-forwarding slave to avoid a duplicate-session conflict (this is what causes forced logouts). Will recheck in 30s.');
+    waStatus = 'LOCKED_ELSEWHERE';
+    waError  = 'Another process on this machine is already running the WhatsApp session.';
+    if (lockRetryTimer) clearTimeout(lockRetryTimer);
+    lockRetryTimer = setTimeout(() => { lockRetryTimer = null; initWhatsApp(); }, 30_000);
+    return;
+  }
+
   initRedisSubscriber();
 
   if (isReconnecting) {
@@ -587,9 +662,9 @@ export const resetWhatsApp = async (isDirect = false) => {
   cleanupSocket();
 
   try { if (fs.existsSync(AUTH_PATH)) fs.removeSync(AUTH_PATH); } catch (_) {}
-  try { await WhatsAppSession.deleteOne({ sessionName: SESSION_NAME }); } catch (_) {}
-  
-  saveStatusToDb(); // Clear status in MongoDB
+  try { await WhatsAppSession.destroy({ where: { sessionName: SESSION_NAME } }); } catch (_) {}
+
+  saveStatusToDb(); // Clear status in MySQL
 
   setTimeout(() => initWhatsApp(), 3_000);
   return true;
@@ -609,9 +684,9 @@ export const getWhatsAppStatus = async () => {
       connectedSince: connectionUpSince ? connectionUpSince.toISOString() : null,
     };
   } else {
-    // Slave process: read status from MongoDB
+    // Slave process: read status from MySQL
     try {
-      const session = await WhatsAppSession.findOne({ sessionName: SESSION_NAME });
+      const session = await WhatsAppSession.findOne({ where: { sessionName: SESSION_NAME } });
       if (!session) {
         return {
           status: 'DISCONNECTED',
@@ -662,6 +737,7 @@ const gracefulShutdown = async (signal) => {
 
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (dbSyncTimer)    { clearTimeout(dbSyncTimer);    dbSyncTimer    = null; }
+  if (lockRetryTimer) { clearTimeout(lockRetryTimer); lockRetryTimer = null; }
 
   try {
     await saveSessionToDb();
@@ -671,10 +747,16 @@ const gracefulShutdown = async (signal) => {
   }
 
   cleanupSocket();
+  releaseMasterLock();
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM').then(() => process.exit(0)));
 process.on('SIGINT',  () => gracefulShutdown('SIGINT').then(() => process.exit(0)));
+// nodemon's documented restart convention: it sends SIGUSR2 on every file-watch
+// restart (not SIGTERM/SIGINT), then waits for us to re-signal ourselves before
+// actually respawning. Without this, the master lock would stay held by the
+// dying process until it goes stale (up to 45s), blocking the new one.
+process.once('SIGUSR2', () => gracefulShutdown('SIGUSR2 (nodemon restart)').then(() => process.kill(process.pid, 'SIGUSR2')));
 process.on('uncaughtException', (err) => {
   console.error('[WhatsApp] 💥 Uncaught exception — attempting graceful save:', err.message);
   gracefulShutdown('uncaughtException').catch(() => {}).finally(() => process.exit(1));

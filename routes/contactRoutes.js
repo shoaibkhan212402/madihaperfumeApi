@@ -1,6 +1,7 @@
 import express from 'express';
-import Newsletter from '../models/Newsletter.js';
+import Newsletter from '../models-sql/Newsletter.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
+import { serializeNewsletter } from '../utils/serializers.js';
 
 const router = express.Router();
 
@@ -53,17 +54,17 @@ router.post('/newsletter', async (req, res) => {
 
     const normalizedEmail = email.toLowerCase().trim();
 
-    // Upsert: if already subscribed, just return success
-    await Newsletter.findOneAndUpdate(
-      { email: normalizedEmail },
-      { email: normalizedEmail, isActive: true },
-      { upsert: true, new: true }
-    );
+    const [, created] = await Newsletter.findOrCreate({
+      where: { email: normalizedEmail },
+      defaults: { email: normalizedEmail, isActive: true },
+    });
 
+    if (!created) {
+      return res.status(200).json({ success: true, message: "You're already subscribed!" });
+    }
     res.status(201).json({ success: true, message: "You're now subscribed! Welcome to the Madiha family." });
   } catch (err) {
-    // Duplicate key = already subscribed
-    if (err.code === 11000) {
+    if (err.name === 'SequelizeUniqueConstraintError') {
       return res.status(200).json({ success: true, message: "You're already subscribed!" });
     }
     res.status(500).json({ message: err.message });
@@ -74,13 +75,12 @@ router.post('/newsletter', async (req, res) => {
 router.get('/newsletter', protect, admin, async (req, res) => {
   try {
     const { page = 1, limit = 50 } = req.query;
-    const skip = (Number(page) - 1) * Number(limit);
-    const total = await Newsletter.countDocuments({ isActive: true });
-    const subscribers = await Newsletter.find({ isActive: true })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit));
-    res.json({ subscribers, total });
+    const offset = (Number(page) - 1) * Number(limit);
+    const total = await Newsletter.count({ where: { isActive: true } });
+    const subscribers = await Newsletter.findAll({
+      where: { isActive: true }, order: [['createdAt', 'DESC']], offset, limit: Number(limit),
+    });
+    res.json({ subscribers: subscribers.map(serializeNewsletter), total });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

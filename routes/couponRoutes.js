@@ -1,24 +1,24 @@
 import express from 'express';
-import Coupon from '../models/Coupon.js';
+import { Op } from 'sequelize';
+import Coupon from '../models-sql/Coupon.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
+import { serializeCoupon } from '../utils/serializers.js';
 
 const router = express.Router();
 
 /* ─────────────────────────────────────────────────────────────
    PUBLIC — POST /api/coupons/apply
-   Validate a coupon code against a cart subtotal.
-   Returns discount details without incrementing usedCount.
 ───────────────────────────────────────────────────────────── */
 router.post('/apply', async (req, res) => {
   try {
     const { code, cartTotal } = req.body;
     if (!code) return res.status(400).json({ message: 'Coupon code is required' });
 
-    const coupon = await Coupon.findOne({ code: code.toUpperCase().trim() });
+    const coupon = await Coupon.findOne({ where: { code: code.toUpperCase().trim() } });
     if (!coupon) return res.status(404).json({ message: 'Invalid coupon code' });
-    if (!coupon.isValid) {
+    if (!coupon.isCouponValid()) {
       let reason = 'This coupon is no longer active';
-      if (coupon.expiresAt && coupon.expiresAt < new Date()) reason = 'This coupon has expired';
+      if (coupon.expiresAt && new Date(coupon.expiresAt) < new Date()) reason = 'This coupon has expired';
       if (coupon.maxUses > 0 && coupon.usedCount >= coupon.maxUses) reason = 'This coupon has reached its usage limit';
       return res.status(400).json({ message: reason });
     }
@@ -28,22 +28,21 @@ router.post('/apply', async (req, res) => {
       });
     }
 
-    // Calculate discount amount
     let discountAmount = 0;
     if (coupon.discountType === 'PERCENT') {
       discountAmount = Math.round((cartTotal * coupon.discountValue) / 100);
     } else {
-      discountAmount = Math.min(coupon.discountValue, cartTotal);
+      discountAmount = Math.min(Number(coupon.discountValue), cartTotal);
     }
 
     res.json({
       code: coupon.code,
       description: coupon.description,
       discountType: coupon.discountType,
-      discountValue: coupon.discountValue,
+      discountValue: Number(coupon.discountValue),
       freeShipping: coupon.freeShipping,
       discountAmount,
-      minOrderAmount: coupon.minOrderAmount,
+      minOrderAmount: Number(coupon.minOrderAmount),
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -52,17 +51,19 @@ router.post('/apply', async (req, res) => {
 
 /* ─────────────────────────────────────────────────────────────
    PUBLIC — GET /api/coupons/public
-   Return only active, non-expired public coupons (limited info)
 ───────────────────────────────────────────────────────────── */
 router.get('/public', async (req, res) => {
   try {
     const now = new Date();
-    const coupons = await Coupon.find({
-      isActive: true,
-      startsAt: { $lte: now },
-      $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
-    }).select('code description discountType discountValue freeShipping minOrderAmount expiresAt');
-    res.json(coupons);
+    const coupons = await Coupon.findAll({
+      where: {
+        isActive: true,
+        startsAt: { [Op.lte]: now },
+        [Op.or]: [{ expiresAt: null }, { expiresAt: { [Op.gt]: now } }],
+      },
+      attributes: ['code', 'description', 'discountType', 'discountValue', 'freeShipping', 'minOrderAmount', 'expiresAt'],
+    });
+    res.json(coupons.map(serializeCoupon));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -74,13 +75,10 @@ router.get('/public', async (req, res) => {
 router.get('/', protect, admin, async (req, res) => {
   try {
     const { page = 1, limit = 50 } = req.query;
-    const skip = (Number(page) - 1) * Number(limit);
-    const total = await Coupon.countDocuments();
-    const coupons = await Coupon.find()
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit));
-    res.json({ coupons, total });
+    const offset = (Number(page) - 1) * Number(limit);
+    const total = await Coupon.count();
+    const coupons = await Coupon.findAll({ order: [['createdAt', 'DESC']], offset, limit: Number(limit) });
+    res.json({ coupons: coupons.map(serializeCoupon), total });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -100,9 +98,7 @@ router.post('/', protect, admin, async (req, res) => {
       return res.status(400).json({ message: 'code, discountType and discountValue are required' });
 
     const coupon = await Coupon.create({
-      code: code.toUpperCase().trim(),
-      description,
-      discountType,
+      code, description, discountType,
       discountValue: Number(discountValue),
       freeShipping: !!freeShipping,
       minOrderAmount: Number(minOrderAmount) || 0,
@@ -112,9 +108,9 @@ router.post('/', protect, admin, async (req, res) => {
       isActive: isActive !== false,
     });
 
-    res.status(201).json(coupon);
+    res.status(201).json(serializeCoupon(coupon));
   } catch (err) {
-    if (err.code === 11000) return res.status(400).json({ message: 'Coupon code already exists' });
+    if (err.name === 'SequelizeUniqueConstraintError') return res.status(400).json({ message: 'Coupon code already exists' });
     res.status(400).json({ message: err.message });
   }
 });
@@ -124,15 +120,23 @@ router.post('/', protect, admin, async (req, res) => {
 ───────────────────────────────────────────────────────────── */
 router.put('/:id', protect, admin, async (req, res) => {
   try {
-    const update = { ...req.body };
-    if (update.code) update.code = update.code.toUpperCase().trim();
-    if (update.discountValue !== undefined) update.discountValue = Number(update.discountValue);
-    if (update.minOrderAmount !== undefined) update.minOrderAmount = Number(update.minOrderAmount);
-    if (update.maxUses !== undefined) update.maxUses = Number(update.maxUses);
-
-    const coupon = await Coupon.findByIdAndUpdate(req.params.id, update, { new: true });
+    const coupon = await Coupon.findByPk(req.params.id);
     if (!coupon) return res.status(404).json({ message: 'Coupon not found' });
-    res.json(coupon);
+
+    const b = req.body;
+    await coupon.update({
+      code: b.code ?? coupon.code,
+      description: b.description ?? coupon.description,
+      discountType: b.discountType ?? coupon.discountType,
+      discountValue: b.discountValue !== undefined ? Number(b.discountValue) : coupon.discountValue,
+      freeShipping: b.freeShipping ?? coupon.freeShipping,
+      minOrderAmount: b.minOrderAmount !== undefined ? Number(b.minOrderAmount) : coupon.minOrderAmount,
+      maxUses: b.maxUses !== undefined ? Number(b.maxUses) : coupon.maxUses,
+      expiresAt: b.expiresAt !== undefined ? b.expiresAt : coupon.expiresAt,
+      startsAt: b.startsAt ?? coupon.startsAt,
+      isActive: b.isActive ?? coupon.isActive,
+    });
+    res.json(serializeCoupon(coupon));
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
@@ -143,7 +147,8 @@ router.put('/:id', protect, admin, async (req, res) => {
 ───────────────────────────────────────────────────────────── */
 router.delete('/:id', protect, admin, async (req, res) => {
   try {
-    await Coupon.findByIdAndDelete(req.params.id);
+    const coupon = await Coupon.findByPk(req.params.id);
+    if (coupon) await coupon.destroy();
     res.json({ message: 'Coupon deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });

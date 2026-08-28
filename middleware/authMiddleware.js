@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
+import { User } from '../models-sql/User.js';
 
 // ── protect: verify JWT and attach req.user ────────────────────────────────
 const protect = async (req, res, next) => {
@@ -12,10 +12,14 @@ const protect = async (req, res, next) => {
   try {
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = await User.findById(decoded.id).select('-password');
-    if (!req.user) {
+    const user = await User.findByPk(decoded.id, { attributes: { exclude: ['password'] } });
+    if (!user) {
       return res.status(401).json({ message: 'Not authorized, user not found' });
     }
+    // Keep req.user._id (not .id) — read everywhere downstream the same way
+    // it was when the app spoke Mongoose.
+    req.user = user;
+    req.user._id = user.id;
     next();
   } catch (error) {
     return res.status(401).json({ message: 'Not authorized, token failed' });

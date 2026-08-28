@@ -63,3 +63,25 @@ export async function uploadToFtp(fileBuffer, originalName) {
     client.close();
   }
 }
+
+/**
+ * Deletes a single file from the Hostinger FTP uploads directory.
+ * @param {string} filename - Just the filename (no directory, no URL prefix)
+ */
+export async function deleteFromFtp(filename) {
+  const client = new ftp.Client(15000);
+  client.ftp.verbose = false;
+
+  const host = process.env.FTP_HOST || '2a02:4780:11:1934:0:1a99:6bb2:9';
+  const user = process.env.FTP_USER || 'u446262194.madihaperfume';
+  const password = process.env.FTP_PASS || 'Madihaperfume@123';
+  const remoteDir = process.env.FTP_REMOTE_DIR || 'uploads';
+
+  try {
+    await client.access({ host, user, password, secure: false });
+    await client.cd(remoteDir);
+    await client.remove(filename);
+  } finally {
+    client.close();
+  }
+}

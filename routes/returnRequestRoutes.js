@@ -1,12 +1,12 @@
 import express from 'express';
-import ReturnRequest from '../models/ReturnRequest.js';
+import ReturnRequest from '../models-sql/ReturnRequest.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
 import { sendWhatsAppSelfMessage } from '../utils/whatsappService.js';
+import { serializeReturnRequest } from '../utils/serializers.js';
 
 const router = express.Router();
 
 // ── POST /api/return-requests  Public: customer submits an order issue ──
-// No login required — covers WhatsApp orders that have no website account.
 router.post('/', async (req, res) => {
   try {
     const {
@@ -32,7 +32,7 @@ router.post('/', async (req, res) => {
       images: Array.isArray(images) ? images.slice(0, 6) : [],
     });
 
-    res.status(201).json({ success: true, message: 'Request submitted. Our team will review it shortly.', request });
+    res.status(201).json({ success: true, message: 'Request submitted. Our team will review it shortly.', request: serializeReturnRequest(request) });
 
     // Fire-and-forget WhatsApp self-notify — never delays the customer's response
     setImmediate(() => {
@@ -45,7 +45,7 @@ router.post('/', async (req, res) => {
         request.orderIdText ? `🧾 Order ref: ${request.orderIdText}` : null,
         `📅 Delivered: ${new Date(request.deliveredAt).toLocaleDateString('en-IN')}`,
         `📝 Issue: ${request.description}`,
-        request.images.length ? `📷 ${request.images.length} photo(s) attached — see admin panel` : null,
+        request.images?.length ? `📷 ${request.images.length} photo(s) attached — see admin panel` : null,
         '',
         'Review in Admin Panel → Return Requests',
       ].filter(Boolean).join('\n');
@@ -60,15 +60,12 @@ router.post('/', async (req, res) => {
 router.get('/', protect, admin, async (req, res) => {
   try {
     const { status, page = 1, limit = 20 } = req.query;
-    const filter = {};
-    if (status) filter.status = status.toUpperCase();
-    const skip = (Number(page) - 1) * Number(limit);
-    const total = await ReturnRequest.countDocuments(filter);
-    const requests = await ReturnRequest.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit));
-    res.json({ requests, total, page: Number(page), pages: Math.ceil(total / Number(limit)) });
+    const where = {};
+    if (status) where.status = status.toUpperCase();
+    const offset = (Number(page) - 1) * Number(limit);
+    const total = await ReturnRequest.count({ where });
+    const requests = await ReturnRequest.findAll({ where, order: [['createdAt', 'DESC']], offset, limit: Number(limit) });
+    res.json({ requests: requests.map(serializeReturnRequest), total, page: Number(page), pages: Math.ceil(total / Number(limit)) });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -81,7 +78,7 @@ router.patch('/:id/approve', protect, admin, async (req, res) => {
     if (!['RETURN', 'REPLACEMENT'].includes(resolutionType))
       return res.status(400).json({ message: 'resolutionType must be RETURN or REPLACEMENT' });
 
-    const request = await ReturnRequest.findById(req.params.id);
+    const request = await ReturnRequest.findByPk(req.params.id);
     if (!request) return res.status(404).json({ message: 'Request not found' });
     if (request.status !== 'PENDING')
       return res.status(400).json({ message: 'Request has already been processed' });
@@ -91,8 +88,8 @@ router.patch('/:id/approve', protect, admin, async (req, res) => {
     if (adminNote) request.adminNote = adminNote;
     request.processedAt = new Date();
 
-    const updated = await request.save();
-    res.json(updated);
+    await request.save();
+    res.json(serializeReturnRequest(request));
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
@@ -104,7 +101,7 @@ router.patch('/:id/reject', protect, admin, async (req, res) => {
     const { reason } = req.body;
     if (!reason?.trim()) return res.status(400).json({ message: 'A rejection reason is required' });
 
-    const request = await ReturnRequest.findById(req.params.id);
+    const request = await ReturnRequest.findByPk(req.params.id);
     if (!request) return res.status(404).json({ message: 'Request not found' });
     if (request.status !== 'PENDING')
       return res.status(400).json({ message: 'Request has already been processed' });
@@ -113,8 +110,8 @@ router.patch('/:id/reject', protect, admin, async (req, res) => {
     request.adminNote = reason.trim();
     request.processedAt = new Date();
 
-    const updated = await request.save();
-    res.json(updated);
+    await request.save();
+    res.json(serializeReturnRequest(request));
   } catch (err) {
     res.status(400).json({ message: err.message });
   }

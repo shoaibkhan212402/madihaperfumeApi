@@ -1,6 +1,6 @@
 import express from 'express';
-import Product from '../models/Product.js';
-import Category from '../models/Category.js';
+import { Product } from '../models-sql/Product.js';
+import Category from '../models-sql/Category.js';
 import { POLICIES } from './pageRoutes.js';
 
 const router = express.Router();
@@ -49,23 +49,23 @@ router.get('/', async (req, res) => {
     }
 
     // 4. Dynamic Categories / Collections
-    const categories = await Category.find({});
+    const categories = await Category.findAll();
     categories.forEach(cat => {
-      const slug = cat.slug || cat._id;
+      const slug = cat.slug || cat.id;
       if (slug) {
-        urls.push({ 
-          loc: `${baseUrl}/collections/${slug}`, 
-          lastmod: formatDate(cat.updatedAt || cat.createdAt), 
-          changefreq: 'daily', 
-          priority: '0.8' 
+        urls.push({
+          loc: `${baseUrl}/collections/${slug}`,
+          lastmod: formatDate(cat.updatedAt || cat.createdAt),
+          changefreq: 'daily',
+          priority: '0.8'
         });
       }
     });
 
     // 5. Dynamic Products
-    const products = await Product.find({ isActive: true });
+    const products = await Product.findAll({ where: { isActive: true } });
     products.forEach(prod => {
-      const slugOrId = prod.slug || prod._id;
+      const slugOrId = prod.slug || prod.id;
       if (slugOrId) {
         urls.push({ 
           loc: `${baseUrl}/products/${slugOrId}`, 

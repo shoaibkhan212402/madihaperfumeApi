@@ -7,6 +7,7 @@ const newsletterSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
+  
 );
 
 const Newsletter = mongoose.model('Newsletter', newsletterSchema);
