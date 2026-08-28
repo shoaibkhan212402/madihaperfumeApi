@@ -9,20 +9,21 @@ const router = express.Router();
 const memoryStorage = multer.memoryStorage();
 const uploadMemory = multer({
   storage: memoryStorage,
-  limits: { fileSize: 15 * 1024 * 1024 } // 15MB limit
+  limits: { fileSize: 60 * 1024 * 1024 } // 60MB — raised from 15MB to fit short reel videos
 });
 
 /**
- * Upload single buffer to Cloudinary with WebP compression
+ * Upload single buffer to Cloudinary. Images get compressed to WebP; video
+ * must go through Cloudinary's video pipeline (resource_type: 'video') and
+ * never gets the webp image transform forced onto it.
  */
-function uploadBufferToCloudinary(fileBuffer) {
+function uploadBufferToCloudinary(fileBuffer, mimetype) {
+  const isVideo = mimetype?.startsWith('video/');
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
-      {
-        folder: 'madiha-perfume',
-        format: 'webp',
-        quality: 'auto',
-      },
+      isVideo
+        ? { folder: 'madiha-perfume', resource_type: 'video' }
+        : { folder: 'madiha-perfume', format: 'webp', quality: 'auto' },
       (err, result) => {
         if (err) reject(err);
         else resolve(result.secure_url);
@@ -55,7 +56,7 @@ router.post('/', uploadMemory.single('image'), async (req, res) => {
     }
 
     // Step 2: Fallback to Cloudinary if FTP is unreachable
-    const cloudinaryUrl = await uploadBufferToCloudinary(req.file.buffer);
+    const cloudinaryUrl = await uploadBufferToCloudinary(req.file.buffer, req.file.mimetype);
     return res.send({
       message: 'Image Uploaded via Cloudinary Fallback',
       image: cloudinaryUrl,
@@ -90,7 +91,7 @@ router.post('/multiple', uploadMemory.array('images', 10), async (req, res) => {
     }
 
     // Step 2: Fallback to Cloudinary if FTP is unreachable
-    const urls = await Promise.all(req.files.map((file) => uploadBufferToCloudinary(file.buffer)));
+    const urls = await Promise.all(req.files.map((file) => uploadBufferToCloudinary(file.buffer, file.mimetype)));
     return res.send({
       message: 'Images Uploaded via Cloudinary Fallback',
       images: urls,

@@ -3,6 +3,7 @@ import Reel from '../models-sql/Reel.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
 import redis from '../config/redis.js';
 import { serializeReel } from '../utils/serializers.js';
+import { deleteMediaUrls } from '../utils/mediaCleanup.js';
 
 const router = express.Router();
 const CACHE_KEY = 'reels_public';
@@ -38,7 +39,10 @@ router.get('/all-admin', protect, admin, async (req, res) => {
 router.post('/', protect, admin, async (req, res) => {
   try {
     const { videoUrl, thumbnail, caption, instagramLink, order, isActive } = req.body;
-    const reel = await Reel.create({ videoUrl, thumbnail, caption, instagramLink, order, isActive });
+    if (!videoUrl?.trim() && !instagramLink?.trim()) {
+      return res.status(400).json({ message: 'Provide a video (upload or direct link) or an Instagram link — one is required.' });
+    }
+    const reel = await Reel.create({ videoUrl: videoUrl || '', thumbnail, caption, instagramLink, order, isActive });
     await clearCache();
     res.status(201).json(serializeReel(reel));
   } catch (err) {
@@ -52,9 +56,14 @@ router.put('/:id', protect, admin, async (req, res) => {
     const reel = await Reel.findByPk(req.params.id);
     if (!reel) return res.status(404).json({ message: 'Reel not found' });
     const r = req.body;
+    const nextVideoUrl = r.videoUrl ?? reel.videoUrl;
+    const nextInstagramLink = r.instagramLink ?? reel.instagramLink;
+    if (!nextVideoUrl?.trim() && !nextInstagramLink?.trim()) {
+      return res.status(400).json({ message: 'Provide a video (upload or direct link) or an Instagram link — one is required.' });
+    }
     await reel.update({
-      videoUrl: r.videoUrl ?? reel.videoUrl, thumbnail: r.thumbnail ?? reel.thumbnail,
-      caption: r.caption ?? reel.caption, instagramLink: r.instagramLink ?? reel.instagramLink,
+      videoUrl: nextVideoUrl, thumbnail: r.thumbnail ?? reel.thumbnail,
+      caption: r.caption ?? reel.caption, instagramLink: nextInstagramLink,
       order: r.order ?? reel.order, isActive: r.isActive ?? reel.isActive,
     });
     await clearCache();
@@ -69,6 +78,7 @@ router.delete('/:id', protect, admin, async (req, res) => {
   try {
     const reel = await Reel.findByPk(req.params.id);
     if (!reel) return res.status(404).json({ message: 'Reel not found' });
+    await deleteMediaUrls([reel.videoUrl, reel.thumbnail]);
     await reel.destroy();
     await clearCache();
     res.json({ message: 'Reel deleted' });
