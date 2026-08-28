@@ -18,10 +18,4 @@ for (const key in process.env) {
   }
 }
 
-const maskURI = (uri) => {
-  if (!uri) return 'MISSING';
-  if (!uri.includes('@')) return uri;
-  return uri.replace(/(mongodb(?:\+srv)?:\/\/[^:]+:)([^@]+)(@.+)/, '$1******$3');
-};
-
-console.log(`✅ Loaded env from: ${envFile} | DB URI: ${maskURI(process.env.DATABASE_URL)}`);
+console.log(`✅ Loaded env from: ${envFile} | MySQL host: ${process.env.MYSQL_HOST || 'MISSING'}`);

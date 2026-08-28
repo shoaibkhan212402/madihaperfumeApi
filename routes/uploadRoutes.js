@@ -32,75 +32,74 @@ function uploadBufferToCloudinary(fileBuffer) {
   });
 }
 
-// ── Single image upload route ───────────────────────────────────────────────
+// ── Single file upload route (image or video) ───────────────────────────────
 router.post('/', uploadMemory.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).send({ message: 'No image provided' });
     }
 
-    // Step 1: Try Cloudinary Upload First
+    // Step 1: Hostinger FTP is the primary store now — own infrastructure,
+    // no per-upload cost, and (unlike the Cloudinary path below) handles
+    // video files as-is instead of forcing a webp image transform.
     try {
-      const cloudinaryUrl = await uploadBufferToCloudinary(req.file.buffer);
+      const ftpUrl = await uploadToFtp(req.file.buffer, req.file.originalname);
       return res.send({
-        message: 'Image Uploaded via Cloudinary',
-        image: cloudinaryUrl,
-        url: cloudinaryUrl,
-        provider: 'cloudinary'
+        message: 'Image Uploaded via FTP',
+        image: ftpUrl,
+        url: ftpUrl,
+        provider: 'ftp'
       });
-    } catch (cloudinaryErr) {
-      console.warn('Cloudinary upload failed, triggering FTP fallback:', cloudinaryErr.message);
+    } catch (ftpErr) {
+      console.warn('FTP upload failed, falling back to Cloudinary:', ftpErr.message);
     }
 
-    // Step 2: Fallback to Hostinger FTP Upload
-    const ftpUrl = await uploadToFtp(req.file.buffer, req.file.originalname);
+    // Step 2: Fallback to Cloudinary if FTP is unreachable
+    const cloudinaryUrl = await uploadBufferToCloudinary(req.file.buffer);
     return res.send({
-      message: 'Image Uploaded via FTP Fallback',
-      image: ftpUrl,
-      url: ftpUrl,
-      provider: 'ftp'
+      message: 'Image Uploaded via Cloudinary Fallback',
+      image: cloudinaryUrl,
+      url: cloudinaryUrl,
+      provider: 'cloudinary'
     });
 
   } catch (error) {
-    console.error('Upload Error (Both Cloudinary & FTP failed):', error);
+    console.error('Upload Error (Both FTP & Cloudinary failed):', error);
     res.status(500).send({ message: 'Failed to upload image', error: error.message });
   }
 });
 
-// ── Multiple image upload route ─────────────────────────────────────────────
+// ── Multiple file upload route ───────────────────────────────────────────────
 router.post('/multiple', uploadMemory.array('images', 10), async (req, res) => {
   try {
     if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
       return res.status(400).send({ message: 'No images provided' });
     }
 
-    // Step 1: Try Cloudinary Upload for all files
+    // Step 1: FTP primary
     try {
-      const uploadPromises = req.files.map((file) => uploadBufferToCloudinary(file.buffer));
-      const urls = await Promise.all(uploadPromises);
+      const ftpUrls = await Promise.all(req.files.map((file) => uploadToFtp(file.buffer, file.originalname)));
       return res.send({
-        message: 'Images Uploaded via Cloudinary',
-        images: urls,
-        urls: urls,
-        provider: 'cloudinary'
+        message: 'Images Uploaded via FTP',
+        images: ftpUrls,
+        urls: ftpUrls,
+        provider: 'ftp'
       });
-    } catch (cloudinaryErr) {
-      console.warn('Multiple Cloudinary upload failed, triggering FTP fallback:', cloudinaryErr.message);
+    } catch (ftpErr) {
+      console.warn('Multiple FTP upload failed, falling back to Cloudinary:', ftpErr.message);
     }
 
-    // Step 2: Fallback to Hostinger FTP Upload for all files
-    const ftpPromises = req.files.map((file) => uploadToFtp(file.buffer, file.originalname));
-    const ftpUrls = await Promise.all(ftpPromises);
-
+    // Step 2: Fallback to Cloudinary if FTP is unreachable
+    const urls = await Promise.all(req.files.map((file) => uploadBufferToCloudinary(file.buffer)));
     return res.send({
-      message: 'Images Uploaded via FTP Fallback',
-      images: ftpUrls,
-      urls: ftpUrls,
-      provider: 'ftp'
+      message: 'Images Uploaded via Cloudinary Fallback',
+      images: urls,
+      urls: urls,
+      provider: 'cloudinary'
     });
 
   } catch (error) {
-    console.error('Multiple Upload Error (Both Cloudinary & FTP failed):', error);
+    console.error('Multiple Upload Error (Both FTP & Cloudinary failed):', error);
     res.status(500).send({ message: 'Failed to upload images', error: error.message });
   }
 });

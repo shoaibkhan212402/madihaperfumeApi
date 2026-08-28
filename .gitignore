@@ -45,3 +45,4 @@ baileys_auth_info/*
 .wwebjs_auth/*
 .wwebjs_cache/*
 .cache/*
+.whatsapp-master.lock
