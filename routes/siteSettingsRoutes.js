@@ -30,11 +30,18 @@ const getOrDefault = async () => {
       instagramReels: [],
     });
     await SiteTestimonial.bulkCreate([
+<<<<<<< HEAD
       { siteSettingsId: settings.id, name: 'Ahmed R.', city: 'Telangana', stars: 5, text: 'Wild Fire ki fragrance bahut premium aur powerful hai. Maine around 10 sprays kiye the aur iski khushboo kapdon par pure 2 din tak feel hoti rahi. Dusre din bhi jab wahi kapde pehne to logon ne fragrance ki tareef ki aur compliment diya. Itni achhi performance honestly expect nahi ki thi. Definitely one of my favourites!', sortOrder: 0 },
       { siteSettingsId: settings.id, name: 'Shafeeq M.', city: 'Kerala', stars: 5, text: 'Oudh Al Hashmi ki khushboo bahut royal aur classy hai. Iski performance bhi zabardast hai — lagbhag 15–16 hours tak fragrance achhi tarah bani rahi. Khaas baat ye hai ki time ke saath iski khushboo aur bhi smooth aur beautiful lagti hai. Premium attar lovers ke liye शानदार choice hai.', sortOrder: 1 },
       { siteSettingsId: settings.id, name: 'Mohammed Z.', city: 'Karnataka', stars: 5, text: 'Mukhallat Rayyan ki fragrance bahut smooth, elegant aur attractive hai. Iski performance around 13–14 hours tak rahi, jo ek attar ke liye kaafi impressive hai. Lagane ke baad kaafi der tak achhi khushboo feel hoti rahi aur compliments bhi mile. Quality se bahut impressed hoon.', sortOrder: 2 },
       { siteSettingsId: settings.id, name: 'Harpreet Singh', city: 'Punjab', stars: 5, text: 'Safwan ki fragrance bahut elegant aur sophisticated hai. Iski performance around 14 hours tak rahi aur kaafi der baad bhi fragrance noticeable thi. Fragrance na bahut strong hai na bahut light — ekdum perfect balance hai. Madiha Perfume ka ye attar mujhe bahut pasand aaya.', sortOrder: 3 },
       { siteSettingsId: settings.id, name: 'Faizan K.', city: 'Maharashtra', stars: 5, text: 'Kaaf ki fragrance bahut fresh, classy aur premium hai. Iski performance ne mujhe sabse zyada impress kiya — around 14 hours tak fragrance bani rahi. Pure din logon se compliments mile aur shaam tak bhi iski khushboo noticeable thi. Daily wear ke liye bhi aur special occasions ke liye bhi zabardast perfume hai.', sortOrder: 4 },
+=======
+      { siteSettingsId: settings.id, name: 'Aisha Rahman', city: 'Hyderabad', stars: 5, text: 'The Royal Oud attar is absolutely divine. It lasts the entire day and I receive so many compliments. Madiha Perfume never disappoints!', initials: 'AR', sortOrder: 0 },
+      { siteSettingsId: settings.id, name: 'Mohammed Iqbal', city: 'Mumbai', stars: 5, text: "Ordered the 3-attar combo for my wedding. My guests couldn't stop asking where I got the fragrance from. Premium quality at an unbeatable price.", initials: 'MI', sortOrder: 1 },
+      { siteSettingsId: settings.id, name: 'Priya Nair', city: 'Bangalore', stars: 5, text: 'I was skeptical ordering online but the packaging was luxury-level and the scent is long-lasting. Will definitely order again!', initials: 'PN', sortOrder: 2 },
+      { siteSettingsId: settings.id, name: 'Zainab Sheikh', city: 'Delhi', stars: 5, text: 'The French Attar collection is simply breathtaking. Very close to designer fragrances but at a fraction of the price. Highly recommend!', initials: 'ZS', sortOrder: 3 },
+>>>>>>> 8ce10c7349aad634d62262e67bdcdd5fbe280045
     ]);
     await SiteWhyUs.bulkCreate([
       { siteSettingsId: settings.id, icon: '🌹', title: '100% Pure Ingredients', desc: "No synthetic fillers. Only the finest oud, saffron, musk and rose extracts from the world's best sources.", sortOrder: 0 },
